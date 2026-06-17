@@ -1,0 +1,2658 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>Notes</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    color-scheme: light dark;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+
+    background-color: #fff;
+    --elevated: #fff;
+    --link: #0066cc;
+    --text: #161616;
+    --outline: #007aff;
+
+    @media (prefers-color-scheme: dark) {
+      background-color: #000;
+      --elevated: #121212;
+      --link: #58a6ff;
+      --text: #fff;
+    }
+  }
+
+  body {
+    color: var(--text);
+  }
+
+  a {
+    color: var(--link);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+  }
+
+  article {
+    outline: none;
+    padding: 18px max(18px, calc(50vw - 400px));
+    width: 100%;
+    min-height: 100dvh;
+    font: 18px / 1.5 system-ui;
+    tab-size: 4;
+    white-space: pre-wrap;
+    text-wrap-style: stable;
+    overflow-wrap: break-word;
+  }
+
+  .md-h1,
+  .md-h2,
+  .md-h3,
+  .md-h4,
+  .md-h5,
+  .md-h6 {
+    font-weight: 700;
+  }
+
+  .md-h1 {
+    font-size: 2em;
+  }
+
+  .md-h2 {
+    font-size: 1.5em;
+  }
+
+  .md-h3 {
+    font-size: 1.25em;
+  }
+
+  .md-h4 {
+    font-size: 1.1em;
+  }
+
+  .md-h5 {
+    font-size: 1em;
+  }
+
+  .md-h6 {
+    font-size: 0.9em;
+  }
+
+  .md-code {
+    font-family: monospace;
+  }
+
+  .md-codeblock {
+    font-family: monospace;
+  }
+
+  .md-listitem {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 0.55em;
+    align-items: start;
+    padding-left: calc(var(--list-level, 0) * 2.1em);
+  }
+
+  .md-listindent {
+    font-size: 0;
+    line-height: 0;
+  }
+
+  .md-listmarker {
+    white-space: pre;
+    min-width: 1.6em;
+    text-align: right;
+    padding-right: 0.05em;
+  }
+
+  .md-listitem[data-empty="true"] .md-listmarker {
+    opacity: 0.18;
+  }
+
+  .md-listcontent {
+    min-width: 0;
+    white-space: pre-wrap;
+  }
+
+  .md-bold {
+    font-weight: bold;
+  }
+
+  .md-strike {
+    text-decoration: line-through;
+  }
+
+  .md-italic {
+    font-style: italic;
+  }
+
+  .md-underline {
+    text-decoration: underline;
+    text-underline-offset: auto;
+    text-decoration-thickness: auto;
+  }
+
+  .md-url {
+    cursor: pointer;
+  }
+
+  /* md-link-source is the raw [text](url) markdown kept as plain
+     text in the editor (not rendered as <a> so the URL isn't lost
+     on save). Style it subtly so the user can distinguish it from
+     regular text, but it doesn't look like a clickable link. */
+  .md-link-source {
+    color: var(--link);
+  }
+
+  #button {
+    -webkit-tap-highlight-color: transparent;
+    background-color: #3a3a3c;
+    border-radius: 50%;
+    border: none;
+    bottom: 15px;
+    box-shadow: 0 3px 5px -1px rgba(0, 0, 0, 0.2), 0 6px 10px 0 rgba(0, 0, 0, 0.14), 0 1px 18px 0 rgba(0, 0, 0, .12);
+    color: #fff;
+    cursor: pointer;
+    display: grid;
+    font-weight: 600;
+    width: 46px;
+    height: 46px;
+    outline: none;
+    overflow: hidden;
+    padding: 0;
+    place-items: center;
+    position: fixed;
+    right: 15px;
+    text-decoration: none;
+    touch-action: manipulation;
+    transition: background-color .3s ease-out;
+    user-select: none;
+    z-index: 1;
+  }
+
+  @media (hover) {
+    #button:hover {
+      color: #fff;
+      background-color: #545456;
+      box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, .12);
+    }
+  }
+
+  #button:focus-visible {
+    outline: 2px solid var(--outline);
+    outline-offset: 2px;
+  }
+
+  span.ripple {
+    position: absolute;
+    border-radius: 50%;
+    transform: scale(0);
+    animation: ripple 600ms linear;
+    background-color: rgba(255, 255, 255, 0.7);
+  }
+
+  @keyframes ripple {
+    to {
+      transform: scale(4);
+      opacity: 0;
+    }
+  }
+
+  #menu {
+    visibility: hidden;
+    transform: scale(0.9) translateY(20px);
+    transition: all 100ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+    opacity: 0;
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    position: fixed;
+    right: 16px;
+    bottom: 77px;
+    box-shadow: 0 19px 38px rgba(0, 0, 0, 0.10), 0 15px 12px rgba(0, 0, 0, 0.05);
+    background: var(--elevated);
+    backdrop-filter: blur(10px);
+    border-radius: 10px;
+    z-index: 2;
+  }
+
+  #menu.visible {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    visibility: visible;
+  }
+
+  #menu .item,
+  #menu button.item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: left;
+    padding: 10px 14px;
+    overflow: hidden;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
+    border: none;
+    touch-action: manipulation;
+    font: 16px / 1.5 system-ui;
+    color: var(--text);
+    background: transparent;
+    width: 100%;
+  }
+
+  #menu .recent-section {
+    padding-top: 6px;
+    border-top: 1px solid rgba(127, 127, 127, 0.16);
+  }
+
+  #menu .recent-label {
+    padding: 10px 14px 6px;
+    font: 12px / 1.4 system-ui;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+
+  #menu .recent-docs {
+    display: flex;
+    flex-direction: column;
+    max-height: 220px;
+    overflow: auto;
+  }
+
+  #menu .recent-doc {
+    display: block;
+    text-align: left;
+  }
+
+  #menu .recent-title {
+    display: block;
+    width: 100%;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    font-weight: 600;
+  }
+
+  #menu .recent-meta {
+    font: 12px / 1.4 system-ui;
+    opacity: 0.65;
+  }
+
+  #menu .selector-section {
+    padding-top: 6px;
+    border-top: 1px solid rgba(127, 127, 127, 0.16);
+  }
+
+  #menu .selector-label {
+    padding: 10px 14px 6px;
+    font: 12px / 1.4 system-ui;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+
+  #menu .doc-selector {
+    display: block;
+    width: calc(100% - 28px);
+    margin: 0 14px 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(127, 127, 127, 0.22);
+    background: var(--elevated);
+    color: var(--text);
+    font: 15px / 1.4 system-ui;
+    outline: none;
+  }
+
+  #menu .doc-selector:focus-visible {
+    outline: 2px solid var(--outline);
+    outline-offset: 2px;
+  }
+
+  #menu .item:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+    @media (prefers-color-scheme: dark) {
+      background-color: #353535;
+    }
+  }
+
+  #menu .item:focus-within {
+    outline: 2px solid var(--outline);
+  }
+
+  #menu .item:first-child {
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+  }
+
+  #menu .item:last-child {
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+  }
+
+  #notification {
+    visibility: hidden;
+    transform: translateY(-30px);
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+    opacity: 0;
+
+    display: flex;
+    flex-direction: column;
+
+    position: fixed;
+    right: 17px;
+    top: 17px;
+
+    background: #5ad227;
+    color: #fff;
+    border-radius: 30px;
+    font: 18px / 1 system-ui;
+    font-weight: 600;
+    z-index: 2;
+    padding: 10px 20px;
+  }
+
+  #notification.visible {
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+  }
+
+  @media print {
+    .noprint {
+      visibility: hidden !important;
+    }
+  }
+</style>
+<article contenteditable="plaintext-only" spellcheck autofocus></article>
+<button id="button" class="noprint">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="1"></circle>
+    <circle cx="12" cy="5" r="1"></circle>
+    <circle cx="12" cy="19" r="1"></circle>
+  </svg>
+</button>
+<div id="menu" class="noprint" role="menu">
+  <button class="item" id="new-document" type="button" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-plus"></use>
+    </svg>
+    New document
+  </button>
+  <button class="item" id="delete-document" type="button" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-trash"></use>
+    </svg>
+    Delete document
+  </button>
+  <div class="recent-section">
+    <div class="recent-label">Recent docs</div>
+    <div id="recent-docs" class="recent-docs" role="none"></div>
+  </div>
+  <div class="selector-section">
+    <div class="selector-label">All docs</div>
+    <select id="doc-selector" class="doc-selector" aria-label="Open any saved document">
+      <option value="">Open all docs…</option>
+    </select>
+  </div>
+  <button class="item" id="copy-rendered" type="button" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-copy"></use>
+    </svg>
+    Copy rendered
+  </button>
+  <a class="item" id="save-as-html" href="" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-empty"></use>
+    </svg>
+    Save as HTML
+  </a>
+  <a class="item" id="save-as-text" href="" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-empty"></use>
+    </svg>
+    Save as TEXT
+  </a>
+  <button class="item" id="link-folder" type="button" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-folder"></use>
+    </svg>
+    <span id="link-folder-label">Link folder…</span>
+  </button>
+  <button class="item" id="refresh-folder" type="button" role="menuitem">
+    <svg aria-hidden="true" focusable="false" width="22" height="22">
+      <use xlink:href="#icon-refresh"></use>
+    </svg>
+    Refresh from folder
+  </button>
+</div>
+<div id="notification" class="noprint"></div>
+<script>
+  initUI()
+
+  const article = document.querySelector('article')
+  const menu = document.querySelector('#menu')
+  const editor = new Editor(article, parseMarkdown)
+  const docsKey = 'notes-docs'
+  const currentDocKey = 'notes-current-doc-id'
+  let docs = loadDocs()
+  let currentDocId = localStorage.getItem(currentDocKey)
+
+  article.addEventListener('input', debounce(500, save))
+  article.addEventListener('blur', save)
+  article.addEventListener('click', event => {
+    if (event.target.tagName === 'A') window.open(event.target.getAttribute('href'), '_blank')
+  })
+  addEventListener('DOMContentLoaded', load)
+  addEventListener('load', () => new MutationObserver(save).observe(article, {attributeFilter: ['style']}))
+  addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyS') {
+      e.preventDefault()
+      downloadHTML()
+    }
+  })
+
+  // Flush save on page unload. Without this, any edits made in the
+  // last 500ms (the debounce window) are lost on reload / tab close /
+  // navigation. pagehide fires reliably on desktop and mobile for
+  // "the page is going away"; visibilitychange:hidden catches the
+  // mobile case where the tab is backgrounded and frozen without
+  // firing unload events.
+  addEventListener('pagehide', save)
+  addEventListener('beforeunload', save)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      save()
+    } else if (document.visibilityState === 'visible') {
+      // Tab refocused - an AI agent / external tool may have edited
+      // files in the linked folder while we were away. Pull in any
+      // changes. No-op if no folder is linked.
+      syncFromFolder()
+    }
+  })
+
+  async function load() {
+    docs = loadDocs()
+    loadDocFilenames()
+    if (!Object.keys(docs).length) {
+      createDoc({content: '', style: null}, false)
+    }
+    const doc = getActiveDoc()
+    applyDoc(doc)
+    renderRecentDocs()
+    renderDocSelector()
+    // Try to restore the linked folder handle (saved in IndexedDB)
+    // and pull in any changes from .md files. Fire-and-forget so the
+    // page is interactive immediately.
+    restoreLinkedFolder()
+  }
+
+  function getActiveDoc() {
+    if (currentDocId && docs[currentDocId]) return docs[currentDocId]
+    const latest = Object.values(docs).sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (latest) {
+      currentDocId = latest.id
+      persistCurrentDocId()
+      return latest
+    }
+    const doc = createDoc({content: '', style: null}, false)
+    currentDocId = doc.id
+    persistCurrentDocId()
+    return doc
+  }
+
+  function applyDoc(doc) {
+    editor.set(doc.content ?? '')
+    if (doc.style) article.setAttribute('style', doc.style)
+    else article.removeAttribute('style')
+    updateTitle()
+  }
+
+  function save() {
+    if (!currentDocId || !docs[currentDocId]) {
+      const doc = createDoc({content: '', style: null}, false)
+      currentDocId = doc.id
+      persistCurrentDocId()
+    }
+
+    const style = article.getAttribute('style')
+    const content = article.textContent || ''
+    const doc = docs[currentDocId]
+    doc.content = content
+    doc.style = style
+    doc.title = extractTitle(content)
+    doc.updatedAt = Date.now()
+    docs[currentDocId] = doc
+    persistDocs()
+    updateTitle()
+    renderRecentDocs()
+    renderDocSelector()
+
+    // Sync to linked folder (no-op if none linked). Fire-and-forget;
+    // errors are surfaced inside syncDocToFile.
+    syncDocToFile(doc)
+  }
+
+  function openDoc(id) {
+    if (!docs[id]) return
+    if (currentDocId !== id) save()
+    currentDocId = id
+    persistCurrentDocId()
+    applyDoc(docs[id])
+    renderRecentDocs()
+    renderDocSelector()
+    menu.classList.remove('visible')
+  }
+
+  function newDoc() {
+    save()
+    const doc = createDoc({content: '', style: null})
+    currentDocId = doc.id
+    persistCurrentDocId()
+    applyDoc(doc)
+    renderRecentDocs()
+    renderDocSelector()
+    menu.classList.remove('visible')
+  }
+
+  function deleteDoc() {
+    if (!currentDocId || !docs[currentDocId]) {
+      menu.classList.remove('visible')
+      return
+    }
+    const doc = docs[currentDocId]
+    const title = getDocTitle(doc)
+    // Use the browser's native confirm dialog. It blocks until the
+    // user decides, which is what we want for a destructive action.
+    // The message includes the doc title (truncated) so the user
+    // knows exactly what they're deleting.
+    const shortTitle = title.length > 60 ? title.slice(0, 57) + '...' : title
+    if (!confirm('Delete "' + shortTitle + '"?\n\nThis cannot be undone.')) {
+      return
+    }
+
+    delete docs[currentDocId]
+    persistDocs()
+
+    // If we deleted the current doc, switch to the most recent
+    // remaining one - or create a fresh empty doc if none are left.
+    const remaining = sortedDocs()
+    if (remaining.length) {
+      currentDocId = remaining[0].id
+      persistCurrentDocId()
+      applyDoc(remaining[0])
+    } else {
+      const fresh = createDoc({content: '', style: null}, false)
+      currentDocId = fresh.id
+      persistCurrentDocId()
+      applyDoc(fresh)
+    }
+
+    renderRecentDocs()
+    renderDocSelector()
+    menu.classList.remove('visible')
+    notify('Document deleted')
+  }
+
+  function renderRecentDocs() {
+    const container = document.querySelector('#recent-docs')
+    if (!container) return
+
+    const items = sortedDocs().slice(0, 5)
+
+    container.replaceChildren()
+
+    if (!items.length) {
+      const empty = document.createElement('div')
+      empty.className = 'item recent-doc'
+      empty.style.cursor = 'default'
+      empty.style.opacity = '0.65'
+      empty.textContent = 'No saved docs yet'
+      container.appendChild(empty)
+      return
+    }
+
+    for (const doc of items) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'item recent-doc'
+      button.setAttribute('role', 'menuitem')
+      if (doc.id === currentDocId) button.setAttribute('aria-current', 'true')
+
+      const title = document.createElement('span')
+      title.className = 'recent-title'
+      title.textContent = getDocTitle(doc)
+
+      const meta = document.createElement('span')
+      meta.className = 'recent-meta'
+      meta.textContent = formatUpdatedAt(doc.updatedAt)
+
+      button.append(title, meta)
+      button.addEventListener('click', () => openDoc(doc.id))
+      container.appendChild(button)
+    }
+  }
+
+  function renderDocSelector() {
+    const selector = document.querySelector('#doc-selector')
+    if (!selector) return
+
+    const current = selector.value
+    selector.replaceChildren()
+
+    const placeholder = document.createElement('option')
+    placeholder.value = ''
+    placeholder.textContent = 'Open all docs…'
+    selector.appendChild(placeholder)
+
+    for (const doc of sortedDocs()) {
+      const option = document.createElement('option')
+      option.value = doc.id
+      option.textContent = `${getDocTitle(doc)} — ${formatUpdatedAt(doc.updatedAt)}`
+      if (doc.id === currentDocId) option.selected = true
+      selector.appendChild(option)
+    }
+
+    selector.value = current || currentDocId || ''
+  }
+
+  function sortedDocs() {
+    return Object.values(docs).sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  function getDocTitle(doc) {
+    return extractTitle(doc?.content || '') || doc?.title || 'Untitled'
+  }
+
+  function extractTitle(content) {
+    const firstLine = content
+      .split('\n')
+      .map(line => line.trim())
+      .find(Boolean)
+
+    if (!firstLine) return 'Notes'
+
+    const cleaned = firstLine
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^[-*+]\s+/, '')
+      .replace(/^\d+[.)]\s+/, '')
+      .replace(/^>\s+/, '')
+      .trim()
+
+    return (cleaned || firstLine).slice(0, 60)
+  }
+
+  function formatUpdatedAt(timestamp) {
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      }).format(timestamp)
+    } catch (e) {
+      return new Date(timestamp).toLocaleString()
+    }
+  }
+
+  function loadDocs() {
+    try {
+      const raw = localStorage.getItem(docsKey)
+      const parsed = raw ? JSON.parse(raw) : {}
+      if (!parsed || typeof parsed !== 'object') return {}
+
+      const normalized = {}
+      for (const [id, doc] of Object.entries(parsed)) {
+        if (!doc || typeof doc !== 'object') continue
+        const content = typeof doc.content === 'string' ? doc.content : ''
+        normalized[id] = {
+          id: doc.id || id,
+          title: extractTitle(content),
+          content,
+          style: typeof doc.style === 'string' ? doc.style : null,
+          updatedAt: Number(doc.updatedAt) || Date.now(),
+        }
+      }
+      return normalized
+    } catch (e) {
+      return {}
+    }
+  }
+
+  function persistDocs() {
+    try {
+      localStorage.setItem(docsKey, JSON.stringify(docs))
+    } catch (e) {
+      // localStorage quota exceeded (typically 5MB) or storage
+      // disabled. Surface this so the user knows their edits aren't
+      // being saved - silent failure here causes real data loss.
+      console.error('persistDocs failed:', e)
+      notify('Save failed - storage full. Use "Save as HTML" to back up.')
+    }
+  }
+
+  // Module-level notify so persistDocs (which is at module scope) can
+  // surface errors. initUI also has its own local notify that does
+  // the same thing - either one updates the same #notification element.
+  function notify(message) {
+    const el = document.querySelector('#notification')
+    if (!el) return
+    el.classList.add('visible')
+    el.textContent = message
+    setTimeout(() => el.classList.remove('visible'), 4e3)
+  }
+
+  function persistCurrentDocId() {
+    try {
+      localStorage.setItem(currentDocKey, currentDocId ?? '')
+    } catch (e) {
+    }
+  }
+
+  function createDoc(initial = {}, select = true) {
+    const doc = {
+      id: newDocId(),
+      title: extractTitle(initial.content || ''),
+      content: initial.content || '',
+      style: initial.style ?? null,
+      updatedAt: Date.now(),
+    }
+
+    docs[doc.id] = doc
+    persistDocs()
+    if (select) {
+      currentDocId = doc.id
+      persistCurrentDocId()
+    }
+    return doc
+  }
+
+  // ---------------------------------------------------------------------------
+  // Folder sync via the File System Access API.
+  //
+  // Lets AI agents / external tools read and write the user's notes as
+  // plain .md files in a real folder on disk. The user picks a folder
+  // once (showDirectoryPicker); the handle is persisted in IndexedDB
+  // so it survives reloads. From then on:
+  //
+  //   - Every save() also writes the current doc to <folder>/<slug>.md
+  //   - On page load + tab refocus, we scan the folder for changed or
+  //     new .md files and merge them into the in-browser docs (newest
+  //     mtime wins).
+  //
+  // Firefox/Safari don't support showDirectoryPicker, so the feature
+  // gracefully no-ops there (menu items still appear but prompt the
+  // user that their browser doesn't support it).
+  // ---------------------------------------------------------------------------
+
+  let linkedFolderHandle = null   // FileSystemDirectoryHandle or null
+  const folderSyncDbName = 'notes-folder-sync'
+  const folderSyncStore = 'handles'
+  const folderSyncKey = 'linked-folder'
+  // Per-doc filename tracking so renames (title change) can delete the
+  // old file when the slug changes. Maps docId -> filename (with .md).
+  const docFilenames = {}  // populated from localStorage on load
+
+  function supportsFolderSync() {
+    return typeof window.showDirectoryPicker === 'function'
+  }
+
+  // IndexedDB helpers for persisting the folder handle across reloads.
+  function openFolderSyncDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(folderSyncDbName, 1)
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore(folderSyncStore)
+      }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+  }
+
+  async function persistFolderHandle(handle) {
+    try {
+      const db = await openFolderSyncDb()
+      const tx = db.transaction(folderSyncStore, 'readwrite')
+      tx.objectStore(folderSyncStore).put(handle, folderSyncKey)
+      await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error) })
+      db.close()
+    } catch (e) {
+      console.error('persistFolderHandle failed:', e)
+    }
+  }
+
+  async function loadPersistedFolderHandle() {
+    try {
+      const db = await openFolderSyncDb()
+      const tx = db.transaction(folderSyncStore, 'readonly')
+      const req = tx.objectStore(folderSyncStore).get(folderSyncKey)
+      const handle = await new Promise((res, rej) => {
+        req.onsuccess = () => res(req.result)
+        req.onerror = () => rej(req.error)
+      })
+      db.close()
+      return handle || null
+    } catch (e) {
+      return null
+    }
+  }
+
+  async function clearPersistedFolderHandle() {
+    try {
+      const db = await openFolderSyncDb()
+      const tx = db.transaction(folderSyncStore, 'readwrite')
+      tx.objectStore(folderSyncStore).delete(folderSyncKey)
+      await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error) })
+      db.close()
+    } catch (e) { /* ignore */ }
+  }
+
+  function loadDocFilenames() {
+    try {
+      const raw = localStorage.getItem('notes-doc-filenames')
+      const parsed = raw ? JSON.parse(raw) : {}
+      Object.assign(docFilenames, parsed)
+    } catch (e) { /* ignore */ }
+  }
+
+  function persistDocFilenames() {
+    try { localStorage.setItem('notes-doc-filenames', JSON.stringify(docFilenames)) }
+    catch (e) { /* ignore */ }
+  }
+
+  // Convert a doc title to a filesystem-safe slug.
+  // "First Alert - Process" -> "First-Alert-Process.md"
+  // Disambiguates with a short doc-id suffix when titles collide.
+  function slugifyTitle(title, docId) {
+    const base = (title || 'untitled')
+      .trim()
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')  // strip filesystem-unsafe chars
+      .replace(/\s+/g, '-')                     // spaces -> dashes
+      .replace(/-+/g, '-')                       // collapse repeated dashes
+      .replace(/^-|-$/g, '')                     // trim leading/trailing dashes
+      || 'untitled'
+    // Append first 6 chars of docId to avoid collisions between docs
+    // with the same title (e.g. multiple "Untitled" docs).
+    const idSuffix = (docId || '').slice(0, 6)
+    return base + '-' + idSuffix + '.md'
+  }
+
+  // Write a single doc to the linked folder. Called from save().
+  // No-ops if no folder is linked. Handles renames: if the doc
+  // previously had a different filename, the old file is deleted.
+  async function syncDocToFile(doc) {
+    if (!linkedFolderHandle || !doc) return
+    try {
+      const newFilename = slugifyTitle(doc.title || extractTitle(doc.content), doc.id)
+      const oldFilename = docFilenames[doc.id]
+
+      // If the slug changed (title rename), delete the old file.
+      if (oldFilename && oldFilename !== newFilename) {
+        try { await linkedFolderHandle.removeEntry(oldFilename) }
+        catch (e) { /* old file may not exist - ignore */ }
+      }
+
+      const fileHandle = await linkedFolderHandle.getFileHandle(newFilename, {create: true})
+      const writable = await fileHandle.createWritable()
+      await writable.write(doc.content || '')
+      await writable.close()
+
+      docFilenames[doc.id] = newFilename
+      persistDocFilenames()
+    } catch (e) {
+      console.error('syncDocToFile failed for', doc.id, e)
+      notify('Folder sync failed - check console')
+    }
+  }
+
+  // Scan the linked folder for .md files and merge them into the
+  // in-browser docs. Strategy:
+  //   1. List all *.md files in the folder.
+  //   2. For each, check if we have a doc mapped to that filename
+  //      (via docFilenames). If yes and the file's mtime is newer
+  //      than the doc's updatedAt, overwrite the doc.
+  //   3. If no doc is mapped to that filename, check if any existing
+  //      doc has matching content - if so, just record the mapping.
+  //      Otherwise create a new doc from the file.
+  //   4. For docs that have a filename mapping but the file is gone,
+  //      leave them alone (don't delete - user might be mid-edit).
+  //
+  // Called on page load, on tab refocus, and via the manual
+  // "Refresh from folder" menu item.
+  async function syncFromFolder() {
+    if (!linkedFolderHandle) return
+    try {
+      const seenFilenames = new Set()
+      let newCount = 0, updatedCount = 0
+
+      for await (const entry of linkedFolderHandle.values()) {
+        if (entry.kind !== 'file' || !entry.name.endsWith('.md')) continue
+        seenFilenames.add(entry.name)
+        const file = await entry.getFile()
+        const fileMtime = file.lastModified
+        const text = await file.text()
+
+        // Find doc by filename mapping
+        let docId = null
+        for (const [id, fn] of Object.entries(docFilenames)) {
+          if (fn === entry.name) { docId = id; break }
+        }
+
+        if (docId && docs[docId]) {
+          // Existing doc - update if file is newer
+          if (fileMtime > docs[docId].updatedAt && text !== docs[docId].content) {
+            docs[docId].content = text
+            docs[docId].title = extractTitle(text)
+            docs[docId].updatedAt = fileMtime
+            updatedCount++
+            // If this is the current doc, refresh the editor view
+            if (docId === currentDocId) {
+              applyDoc(docs[docId])
+            }
+          }
+        } else {
+          // Try to match by content to a doc that has no filename yet
+          let matched = false
+          for (const [id, doc] of Object.entries(docs)) {
+            if (!docFilenames[id] && doc.content === text) {
+              docFilenames[id] = entry.name
+              matched = true
+              break
+            }
+          }
+          if (!matched) {
+            // Genuinely new file - create a new doc
+            const doc = createDoc({content: text, style: null}, false)
+            docFilenames[doc.id] = entry.name
+            newCount++
+          }
+        }
+      }
+
+      persistDocs()
+      persistDocFilenames()
+      renderRecentDocs()
+      renderDocSelector()
+
+      if (newCount || updatedCount) {
+        notify(`Synced from folder: ${newCount} new, ${updatedCount} updated`)
+      }
+    } catch (e) {
+      console.error('syncFromFolder failed:', e)
+      notify('Folder refresh failed - check console')
+    }
+  }
+
+  // User-initiated folder link. Prompts for a directory picker, then
+  // does an initial sync (import any existing .md files).
+  async function linkFolder() {
+    if (!supportsFolderSync()) {
+      notify('Folder sync not supported in this browser. Use Chrome or Edge.')
+      return
+    }
+    try {
+      const handle = await window.showDirectoryPicker({mode: 'readwrite'})
+      linkedFolderHandle = handle
+      await persistFolderHandle(handle)
+      updateLinkFolderLabel()
+      notify('Folder linked: ' + handle.name)
+      // Initial sync - pull in any .md files already in the folder
+      await syncFromFolder()
+    } catch (e) {
+      if (e.name === 'AbortError') return  // user cancelled
+      console.error('linkFolder failed:', e)
+      notify('Could not link folder - see console')
+    }
+  }
+
+  async function unlinkFolder() {
+    linkedFolderHandle = null
+    await clearPersistedFolderHandle()
+    updateLinkFolderLabel()
+    notify('Folder unlinked - files kept on disk')
+  }
+
+  function updateLinkFolderLabel() {
+    const label = document.querySelector('#link-folder-label')
+    if (!label) return
+    label.textContent = linkedFolderHandle
+      ? 'Unlink folder (' + linkedFolderHandle.name + ')'
+      : 'Link folder…'
+  }
+
+  // On page load, try to restore the persisted folder handle. The
+  // browser may prompt for permission again if the handle was revoked.
+  async function restoreLinkedFolder() {
+    if (!supportsFolderSync()) return
+    const handle = await loadPersistedFolderHandle()
+    if (!handle) return
+    // Verify we still have permission. If not, request it silently
+    // first; if that fails, the user will need to click "Link folder"
+    // again (browser UX, not much we can do).
+    try {
+      const perm = await handle.queryPermission({mode: 'readwrite'})
+      if (perm === 'granted') {
+        linkedFolderHandle = handle
+        updateLinkFolderLabel()
+        await syncFromFolder()
+        return
+      }
+      const requested = await handle.requestPermission({mode: 'readwrite'})
+      if (requested === 'granted') {
+        linkedFolderHandle = handle
+        updateLinkFolderLabel()
+        await syncFromFolder()
+      }
+    } catch (e) {
+      console.error('restoreLinkedFolder failed:', e)
+    }
+  }
+
+  function newDocId() {
+    if (crypto?.randomUUID) return crypto.randomUUID()
+    return `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
+
+  function updateTitle() {
+    document.title = extractTitle(article.textContent || '')
+  }
+
+  function debounce(ms, fn) {
+    let timer
+    return (...args) => {
+      clearTimeout(timer)
+      timer = setTimeout(() => fn(...args), ms)
+    }
+  }
+
+  async function downloadHTML() {
+    updateTitle()
+    // Build clean semantic HTML (real <ul>/<ol>/<li>, <a>, <h1>..<h6>,
+    // <b>/<i>/<u>/<s>/<code>, <pre><code>) from the article's raw
+    // markdown textContent. This way the saved file shows the rendered
+    // document - not the editor's internal span-based representation
+    // with raw markdown markers.
+    const semantic = buildSemanticHTML(article)
+    const html = '<!DOCTYPE html>\n' +
+      '<html lang="en">\n<head>\n' +
+      '<meta charset="utf-8">\n' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+      '<title>' + escapeHtml(document.title) + '</title>\n' +
+      '<style>\n' + renderedDocStyles + '</style>\n' +
+      '</head>\n<body>\n' +
+      semantic.outerHTML +
+      '\n</body>\n</html>\n'
+
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: document.title + '.html',
+          types: [{
+            description: 'HTML file',
+            accept: {'text/html': ['.html']},
+          }],
+        })
+        const writable = await handle.createWritable()
+        await writable.write(html)
+        await writable.close()
+        return
+      } catch (e) {
+        if (e.name === 'AbortError') return
+      }
+    }
+
+    const blob = new Blob([html], {type: 'text/html'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = document.title + '.html'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  }
+
+  // CSS for the standalone HTML file produced by downloadHTML.
+  // Mirrors the editor's visual style (font, padding, colors, dark
+  // mode) but targets semantic tags (h1, ul, a, pre, ...) instead of
+  // the editor's .md-* span classes.
+  const renderedDocStyles = `
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html {
+      color-scheme: light dark;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      background-color: #fff;
+      --link: #0066cc;
+      --text: #161616;
+      @media (prefers-color-scheme: dark) {
+        background-color: #000;
+        --link: #58a6ff;
+        --text: #fff;
+      }
+    }
+    body {
+      color: var(--text);
+      padding: 18px max(18px, calc(50vw - 400px));
+      min-height: 100dvh;
+      font: 18px / 1.5 system-ui;
+      tab-size: 4;
+      overflow-wrap: break-word;
+    }
+    a {
+      color: var(--link);
+      text-decoration: underline;
+      text-underline-offset: 4px;
+      text-decoration-thickness: 1px;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      font-weight: 700;
+      margin-top: 1em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2em; }
+    h2 { font-size: 1.5em; }
+    h3 { font-size: 1.25em; }
+    h4 { font-size: 1.1em; }
+    h5 { font-size: 1em; }
+    h6 { font-size: 0.9em; }
+    p { margin: 0.5em 0; }
+    ul, ol {
+      padding-left: 1.5em;
+      margin: 0.5em 0;
+    }
+    li { margin: 0.25em 0; }
+    li > ul, li > ol { margin: 0.25em 0; }
+    code { font-family: monospace; }
+    pre {
+      font-family: monospace;
+      padding: 12px;
+      background: rgba(128, 128, 128, 0.1);
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 0.5em 0;
+    }
+    pre code { padding: 0; background: none; }
+    blockquote {
+      border-left: 3px solid currentColor;
+      padding-left: 1em;
+      opacity: 0.7;
+      margin: 0.5em 0;
+    }
+  `
+
+  async function downloadTXT() {
+    updateTitle()
+    const text = article.textContent
+
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: document.title + '.txt',
+          types: [{
+            description: 'TEXT file',
+            accept: {'text/plain': ['.txt']},
+          }],
+        })
+        const writable = await handle.createWritable()
+        await writable.write(text)
+        await writable.close()
+        return
+      } catch (e) {
+        if (e.name === 'AbortError') return
+      }
+    }
+
+    const blob = new Blob([text], {type: 'text/plain'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = document.title + '.txt'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Copy the rendered article to the clipboard as rich text so that,
+  // when pasted into Gmail / Word / Google Docs / Slack, lists become
+  // real <ul>/<ol> lists and links become real clickable <a> links
+  // (instead of plain text with bullet glyphs and bracket URLs).
+  //
+  // The article is rendered by parseMarkdown() as a flat sequence of
+  // <span class="md-..."> elements inside a pre-wrap container. We
+  // rebuild it as semantic HTML before copying: listitem spans are
+  // grouped into nested <ul>/<ol>, headings become <h1>..<h6>, inline
+  // markers become <b>/<i>/<u>/<s>/<code>, and existing <a> links are
+  // preserved verbatim.
+  async function copyRendered() {
+    const semantic = buildSemanticHTML(article)
+    const html = '<div>' + semantic.innerHTML + '</div>'
+    const text = article.textContent
+
+    let ok = false
+    if (navigator.clipboard && window.ClipboardItem) {
+      try {
+        const item = new ClipboardItem({
+          'text/html': new Blob([html], {type: 'text/html'}),
+          'text/plain': new Blob([text], {type: 'text/plain'}),
+        })
+        await navigator.clipboard.write([item])
+        ok = true
+      } catch (e) {
+        // fall through to execCommand fallback
+      }
+    }
+
+    if (!ok) {
+      const ta = document.createElement('div')
+      ta.contentEditable = 'true'
+      ta.innerHTML = html
+      ta.style.position = 'fixed'
+      ta.style.top = '-9999px'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      const sel = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(ta)
+      sel.removeAllRanges()
+      sel.addRange(range)
+      try { document.execCommand('copy') } catch (e) {}
+      sel.removeAllRanges()
+      document.body.removeChild(ta)
+    }
+  }
+
+  // Build semantic HTML directly from the article's raw textContent,
+  // so that when pasted into Gmail / Word / Google Docs / Slack, lists
+  // become real <ul>/<ol>, links become real <a>, headings become
+  // real <h1>..<h6>, and inline formatting (bold / italic / underline
+  // / strike / code) is preserved - with all markdown markers stripped.
+  //
+  // We deliberately do NOT walk the rendered article DOM. parseMarkdown
+  // leaves the raw markdown source as textContent of each span (so
+  // '**bold**' is stored literally), and its multi-line list handling
+  // only styles the first item of a list. Re-parsing from textContent
+  // sidesteps both issues and keeps this function independent of any
+  // future changes to the editor's renderer.
+  function buildSemanticHTML(source) {
+    const text = source.textContent || ''
+    const root = document.createElement('div')
+    const lines = text.split('\n')
+
+    let i = 0
+    let para = null
+
+    function flushPara() {
+      if (para && para.textContent.trim()) root.appendChild(para)
+      para = null
+    }
+
+    function appendToPara(nodes) {
+      if (!para) para = document.createElement('p')
+      for (const n of nodes) para.appendChild(n)
+    }
+
+    // Parse a single line of inline markdown into an array of DOM
+    // nodes (Text, <b>, <i>, <u>, <s>, <code>, <a>). Recurses for
+    // nested formatting inside <b>/<i>/<u>/<s> (e.g. **bold _italic_**).
+    function parseInline(s) {
+      // Each matcher captures the inner content (markers stripped by
+      // the wrapper). The 'tag' field is the semantic element to emit.
+      // Order matters: underline before bold/italic (uses ++), bold
+      // before italic (so ** wins over *), link before url (so [t](u)
+      // wins over bare http://...).
+      const matchers = [
+        {re: /\+\+((?:(?!\+\+).)+?)\+\+/y, tag: 'u'},
+        {re: /\*\*([^*\n]+?)\*\*/y, tag: 'b'},
+        {re: /__([^_\n]+?)__/y, tag: 'b'},
+        {re: /~~([^~\n]+?)~~/y, tag: 's'},
+        {re: /\*([^*\n]+?)\*/y, tag: 'i'},
+        {re: /_([^_\n]+?)_/y, tag: 'i'},
+        {re: /`([^`\n]*)`/y, tag: 'code'},
+      ]
+      const linkRe = /\[([^\]\n]+)\]\((https?:\/\/[^\s<>()\[\]{}"'`]+)\)/y
+      const urlRe = /https?:\/\/[^\s<>()\[\]{}"'`]+/y
+
+      const nodes = []
+      let i = 0
+      while (i < s.length) {
+        // Try link first (so [text](url) wins over bare url).
+        linkRe.lastIndex = i
+        const linkMatch = linkRe.exec(s)
+        if (linkMatch && linkMatch.index === i) {
+          const a = document.createElement('a')
+          a.href = linkMatch[2]
+          for (const n of parseInline(linkMatch[1])) a.appendChild(n)
+          a.normalize()
+          nodes.push(a)
+          i += linkMatch[0].length
+          continue
+        }
+        // Bare URL.
+        urlRe.lastIndex = i
+        const urlMatch = urlRe.exec(s)
+        if (urlMatch && urlMatch.index === i) {
+          const a = document.createElement('a')
+          a.href = urlMatch[0]
+          a.textContent = urlMatch[0]
+          nodes.push(a)
+          i += urlMatch[0].length
+          continue
+        }
+        // Inline format markers.
+        let matched = false
+        for (const m of matchers) {
+          m.re.lastIndex = i
+          const res = m.re.exec(s)
+          if (res && res.index === i) {
+            const el = document.createElement(m.tag)
+            // Recurse so e.g. **bold _italic_** produces <b>bold <i>italic</i></b>.
+            for (const n of parseInline(res[1])) el.appendChild(n)
+            el.normalize()
+            nodes.push(el)
+            i += res[0].length
+            matched = true
+            break
+          }
+        }
+        if (matched) continue
+        // Find next special char to retry from.
+        const specials = '`~*_+[h'
+        let next = s.length
+        for (const ch of specials) {
+          const idx = s.indexOf(ch, i)
+          if (idx !== -1 && idx < next) next = idx
+        }
+        if (next === i) {
+          nodes.push(document.createTextNode(s[i]))
+          i++
+        } else {
+          nodes.push(document.createTextNode(s.slice(i, next)))
+          i = next
+        }
+      }
+      return nodes
+    }
+
+    // Collect a list (possibly nested) starting at line i. Returns
+    // {list, nextI}. Indent level is derived from leading whitespace
+    // (each 2 spaces = 1 level, tabs count as 2 spaces).
+    function collectList(startLevel, ordered, startI) {
+      const list = document.createElement(ordered ? 'ol' : 'ul')
+      let j = startI
+      while (j < lines.length) {
+        const line = lines[j]
+        const m = line.match(/^([ \t]{0,8})(-|\d+[.)])[ \t]+([^\n]*)$/)
+        if (!m) break
+        const indent = m[1].replace(/\t/g, '  ').length
+        const level = Math.floor(indent / 2)
+        const isOrdered = /^\d+[.)]$/.test(m[2])
+        if (level < startLevel) break
+        if (level === startLevel) {
+          if (isOrdered !== ordered) break
+          const li = document.createElement('li')
+          for (const n of parseInline(m[3])) li.appendChild(n)
+          list.appendChild(li)
+          j++
+          // Peek next line: if it's a deeper-level list item, recurse
+          // and append the nested list to this <li>.
+          if (j < lines.length) {
+            const next = lines[j]
+            const nm = next.match(/^([ \t]{0,8})(-|\d+[.)])[ \t]+([^\n]*)$/)
+            if (nm) {
+              const nIndent = nm[1].replace(/\t/g, '  ').length
+              const nLevel = Math.floor(nIndent / 2)
+              const nOrdered = /^\d+[.)]$/.test(nm[2])
+              if (nLevel > startLevel) {
+                const nested = collectList(nLevel, nOrdered, j)
+                li.appendChild(nested.list)
+                j = nested.nextI
+              }
+            }
+          }
+        } else if (level > startLevel) {
+          // Deeper level encountered directly - shouldn't happen
+          // because we handle nested via the peek above, but guard
+          // against it just in case.
+          break
+        }
+      }
+      return {list, nextI: j}
+    }
+
+    while (i < lines.length) {
+      const line = lines[i]
+
+      // Code block: ``` or ~~~ fences.
+      const fence = line.match(/^(```|~~~)(.*)$/)
+      if (fence) {
+        flushPara()
+        const marker = fence[1]
+        const code = []
+        i++
+        while (i < lines.length && lines[i] !== marker) {
+          code.push(lines[i])
+          i++
+        }
+        i++ // skip closing fence
+        const pre = document.createElement('pre')
+        const codeEl = document.createElement('code')
+        codeEl.textContent = code.join('\n')
+        pre.appendChild(codeEl)
+        root.appendChild(pre)
+        continue
+      }
+
+      // Heading: 1-6 # followed by space.
+      const h = line.match(/^(#{1,6})[ \t]+(.*)$/)
+      if (h) {
+        flushPara()
+        const level = h[1].length
+        const el = document.createElement('h' + level)
+        for (const n of parseInline(h[2])) el.appendChild(n)
+        root.appendChild(el)
+        i++
+        continue
+      }
+
+      // List item.
+      const li = line.match(/^([ \t]{0,8})(-|\d+[.)])[ \t]+([^\n]*)$/)
+      if (li) {
+        flushPara()
+        const indent = li[1].replace(/\t/g, '  ').length
+        const level = Math.floor(indent / 2)
+        const ordered = /^\d+[.)]$/.test(li[2])
+        const result = collectList(level, ordered, i)
+        root.appendChild(result.list)
+        i = result.nextI
+        continue
+      }
+
+      // Empty line: paragraph break.
+      if (!line.trim()) {
+        flushPara()
+        i++
+        continue
+      }
+
+      // Regular text line.
+      appendToPara(parseInline(line))
+      i++
+    }
+
+    flushPara()
+    root.normalize()
+    return root
+  }
+
+  // Convert a bare URL into a markdown link with a smart title and
+  // the full URL preserved as the href.
+  //
+  // Title extraction:
+  //   1. Strip trailing slash, query (?...), and fragment (#...).
+  //   2. Take the part after the last '/'.
+  //   3. If there's no '/' (just a domain), use the domain with its
+  //      TLD stripped (e.g. 'example.com' -> 'example').
+  //   4. Decode percent-encoded chars (e.g. %20 -> space).
+  //   5. Replace '+' and '_' with spaces.
+  //   6. Collapse multiple spaces, trim.
+  //
+  // The URL inside (...) is kept intact so the rendered <a href> works.
+  // The visible link text is the smart title, which is naturally short,
+  // so the editor doesn't get dominated by long URLs.
+  function urlToMarkdownLink(rawUrl) {
+    let url = rawUrl.trim()
+    // Strip trailing slash, query, fragment for title extraction.
+    const stripped = url.replace(/[?#].*$/, '').replace(/\/$/, '')
+
+    let title
+    const schemeIdx = stripped.indexOf('://')
+    const slashIdx = stripped.lastIndexOf('/')
+    if (slashIdx === -1 || (schemeIdx >= 0 && slashIdx < schemeIdx + 3)) {
+      // No path - use the domain. Strip 'www.' and the TLD.
+      const host = stripped.replace(/^https?:\/\//, '').replace(/^www\./, '')
+      const dotIdx = host.lastIndexOf('.')
+      title = dotIdx > 0 ? host.slice(0, dotIdx) : host
+    } else {
+      title = stripped.slice(slashIdx + 1)
+    }
+
+    // Replace '+' with spaces FIRST (URL path convention), THEN decode
+    // percent-encoding. This way '%2B' (encoded '+') survives the '+'
+    // -> ' ' step and becomes a literal '+' after decoding.
+    title = title.replace(/[+_]/g, ' ')
+    try { title = decodeURIComponent(title) } catch (e) { /* keep raw */ }
+    // Collapse whitespace and trim.
+    title = title.replace(/\s+/g, ' ').trim()
+
+    // If we ended up with no title (e.g. URL was just 'https://'),
+    // fall back to the raw URL.
+    if (!title) title = url
+
+    return '[' + title + '](' + url + ')'
+  }
+
+  // Scan a string for bare URLs (http:// or https://) and replace
+  // each with a markdown link via urlToMarkdownLink(). URLs that are
+  // already inside markdown link syntax - [text](url) - are skipped
+  // so we don't double-convert. URLs inside inline code (`...`) are
+  // also skipped.
+  function convertBareUrls(text) {
+    const urlRe = /https?:\/\/[^\s<>()\[\]{}"'`]+/g
+    let out = ''
+    let last = 0
+    let m
+    while ((m = urlRe.exec(text)) !== null) {
+      const url = m[0]
+      const start = m.index
+      // Look at what's immediately before the URL.
+      // If we see '](' (markdown link syntax) or we're inside backticks,
+      // skip this URL.
+      const before = text.slice(0, start)
+      const lastOpenBracket = before.lastIndexOf('[')
+      const lastCloseBracket = before.lastIndexOf(']')
+      const lastParen = before.lastIndexOf('(')
+      // Inside markdown link if: there's a ']' after the last '[',
+      // AND there's a '(' immediately after that ']' (i.e. we're
+      // between '(' and the matching ')').
+      const inMarkdownLink = lastCloseBracket > lastOpenBracket &&
+                             lastParen === lastCloseBracket + 1
+      // Check if we're inside backticks: count backticks before this
+      // position; odd count = inside.
+      const backtickCount = (before.match(/`/g) || []).length
+      const inCode = backtickCount % 2 === 1
+
+      if (inMarkdownLink || inCode) {
+        out += text.slice(last, start + url.length)
+        last = start + url.length
+        continue
+      }
+
+      // Trim trailing punctuation that's unlikely part of the URL.
+      // Common case: user copies URL followed by '.' or ','.
+      let cleanUrl = url
+      while (cleanUrl && /[.,;:!?)\]]$/.test(cleanUrl)) {
+        cleanUrl = cleanUrl.slice(0, -1)
+      }
+      out += text.slice(last, start)
+      out += urlToMarkdownLink(cleanUrl)
+      last = start + cleanUrl.length
+      // Advance regex lastIndex if we trimmed chars.
+      if (cleanUrl.length < url.length) {
+        urlRe.lastIndex = start + cleanUrl.length
+      }
+    }
+    out += text.slice(last)
+    return out
+  }
+
+  function parseMarkdown(element) {
+    const input = element.textContent
+    const frag = document.createDocumentFragment()
+
+    const matchers = [
+      // Underline (++text++) must be checked BEFORE the list matcher.
+      // The content uses a "tempered greedy" pattern (?:(?!\+\+).)+?
+      // so a single '+' is allowed inside the underlined text but the
+      // match still stops at the first closing ++.
+      {name: 'md-underline', re: /\+\+(?:(?!\+\+).)+?\+\+/y},
+      // List markers: only '-' and numbered ("1." / "1)"). The user
+      // does NOT want '+' or '*' to start a bullet, since '+' is used
+      // for underline (++text++) and '*' for bold/italic.
+      {name: 'md-listitem', re: /^([ \t]{0,8})(-|\d+[.)])([ \t]*)([^\n]*)$/my},
+      {name: 'md-codeblock', re: /```[^\n]*\n[\s\S]*?\n```/y},
+      {name: 'md-codeblock', re: /~~~[^\n]*\n[\s\S]*?\n~~~/y},
+      {name: 'md-h1', re: /^#[ \t]+[^\n]*$/my},
+      {name: 'md-h2', re: /^##[ \t]+[^\n]*$/my},
+      {name: 'md-h3', re: /^###[ \t]+[^\n]*$/my},
+      {name: 'md-h4', re: /^####[ \t]+[^\n]*$/my},
+      {name: 'md-h5', re: /^#####[ \t]+[^\n]*$/my},
+      {name: 'md-h6', re: /^######[ \t]+[^\n]*$/my},
+      {name: 'md-code', re: /`[^`\n]*`/y},
+      {name: 'md-bold', re: /\*\*[^*\n]+?\*\*/y},
+      {name: 'md-bold', re: /__[^_\n]+?__/y},
+      {name: 'md-strike', re: /~~[^~\n]+?~~/y},
+      {name: 'md-italic', re: /\*[^*\n]+?\*/y},
+      {name: 'md-italic', re: /_[^_\n]+?_/y},
+      {name: 'md-url', re: /https?:\/\/[^\s<>()\[\]{}"'`]+/y},
+      {name: 'md-link', re: /\[([^\]\n]+)\]\((https?:\/\/[^\s<>()\[\]{}"'`]+)\)/y},
+    ]
+
+    const specials = ['`', '~', '*', '#', '_', 'h', '+', '[']
+
+    let i = 0
+    while (i < input.length) {
+      let matched = false
+      for (const m of matchers) {
+        m.re.lastIndex = i
+        const res = m.re.exec(input)
+        if (res && res.index === i) {
+          const raw = res[0]
+          if (m.name === 'md-link') {
+            // Don't render as <a>. If we did, the URL would only live
+            // in the href attribute, and save() - which reads
+            // article.textContent - would lose the URL entirely.
+            // Instead, keep the full [text](url) markdown as plain
+            // text so it stays visible, editable, and persisted.
+            // buildSemanticHTML (used by "copy rendered") has its own
+            // parser that converts this to a proper <a> on export.
+            const span = document.createElement('span')
+            span.className = 'md-link-source'
+            span.textContent = raw
+            frag.appendChild(span)
+          } else if (m.name === 'md-url') {
+            const a = document.createElement('a')
+            a.className = 'md-url'
+            a.href = raw
+            a.textContent = raw
+            a.target = '_blank'
+            a.rel = 'noopener noreferrer'
+            frag.appendChild(a)
+          } else if (m.name === 'md-listitem') {
+            const [, indent, marker, spacing, content] = res
+            const level = Math.floor((indent.replace(/\t/g, '  ').length || 0) / 2)
+            const item = document.createElement('span')
+            item.className = 'md-listitem'
+            item.style.setProperty('--list-level', level)
+            item.dataset.empty = String(!content.trim())
+
+            const indentSpan = document.createElement('span')
+            indentSpan.className = 'md-listindent'
+            indentSpan.textContent = indent
+
+            const markerSpan = document.createElement('span')
+            markerSpan.className = 'md-listmarker'
+            markerSpan.textContent = /^\d+[.)]$/.test(marker) ? marker : '•'
+
+            const contentSpan = document.createElement('span')
+            contentSpan.className = 'md-listcontent'
+            contentSpan.textContent = spacing + content
+
+            item.append(indentSpan, markerSpan, contentSpan)
+            frag.appendChild(item)
+          } else {
+            const span = document.createElement('span')
+            span.className = m.name
+            span.textContent = raw
+            frag.appendChild(span)
+          }
+          i += raw.length
+          matched = true
+          break
+        }
+      }
+
+      if (matched) continue
+
+      let next = input.length
+      for (const ch of specials) {
+        const idx = input.indexOf(ch, i)
+        if (idx !== -1 && idx < next) next = idx
+      }
+
+      if (next === i) {
+        frag.appendChild(document.createTextNode(input[i]))
+        i++
+        continue
+      }
+
+      frag.appendChild(document.createTextNode(input.slice(i, next)))
+      i = next
+    }
+
+    article.textContent = ''
+    article.appendChild(frag)
+    article.normalize()
+  }
+
+  function initUI() {
+    const menu = document.querySelector('#menu')
+    const button = document.querySelector('#button')
+    const newDocument = document.querySelector('#new-document')
+    const deleteDocument = document.querySelector('#delete-document')
+    const docSelector = document.querySelector('#doc-selector')
+    const saveAsHTML = document.querySelector('#save-as-html')
+    const saveAsText = document.querySelector('#save-as-text')
+    const copyRenderedBtn = document.querySelector('#copy-rendered')
+    const linkFolderBtn = document.querySelector('#link-folder')
+    const refreshFolderBtn = document.querySelector('#refresh-folder')
+
+    button.addEventListener('click', event => {
+      if (event.clientX || event.targetTouches) ripple(event)
+      renderRecentDocs()
+      renderDocSelector()
+      menu.classList.toggle('visible')
+    })
+
+    function hideMenu() {
+      menu.classList.remove('visible')
+    }
+
+    function notify(message) {
+      const notification = document.querySelector('#notification')
+      notification.classList.add('visible')
+      notification.textContent = message
+      setTimeout(() => notification.classList.remove('visible'), 2e3)
+    }
+
+    document.body.addEventListener('click', event => {
+      let t = event.target
+      if (t.closest('#menu')) return
+      if (t.closest('#button')) return
+      if (t.closest('.ripple')) return
+      menu.classList.remove('visible')
+    })
+
+    newDocument.addEventListener('click', event => {
+      event.preventDefault()
+      newDoc()
+    })
+    deleteDocument.addEventListener('click', event => {
+      event.preventDefault()
+      deleteDoc()
+    })
+    docSelector?.addEventListener('change', event => {
+      const id = event.target.value
+      if (id) openDoc(id)
+    })
+    saveAsHTML.addEventListener('click', event => {
+      event.preventDefault()
+      downloadHTML()
+      hideMenu()
+    })
+    saveAsText.addEventListener('click', event => {
+      event.preventDefault()
+      downloadTXT()
+      hideMenu()
+    })
+    copyRenderedBtn.addEventListener('click', async event => {
+      event.preventDefault()
+      await copyRendered()
+      notify('Copied rendered content')
+      hideMenu()
+    })
+    linkFolderBtn.addEventListener('click', async event => {
+      event.preventDefault()
+      if (linkedFolderHandle) {
+        await unlinkFolder()
+      } else {
+        await linkFolder()
+      }
+      hideMenu()
+    })
+    refreshFolderBtn.addEventListener('click', async event => {
+      event.preventDefault()
+      if (!linkedFolderHandle) {
+        notify('No folder linked. Use "Link folder…" first.')
+      } else {
+        await syncFromFolder()
+      }
+      hideMenu()
+    })
+  }
+
+  function ripple(event) {
+    const button = event.currentTarget
+    const circle = document.createElement('span')
+    const diameter = Math.max(button.clientWidth, button.clientHeight)
+    const radius = diameter / 2
+    circle.style.width = circle.style.height = `${diameter}px`
+    circle.style.left = `${(event.clientX || event.targetTouches[0].pageX) - button.offsetLeft - radius}px`
+    circle.style.top = `${(event.clientY || event.targetTouches[0].pageY) - button.offsetTop - radius}px`
+    circle.classList.add('ripple')
+    const ripple = button.getElementsByClassName('ripple')[0]
+    if (ripple) ripple.remove()
+    button.appendChild(circle)
+  }
+
+  // Convert clipboard HTML to the app's markdown syntax so that
+  // formatting (underline, bold, italic, strike, code, headings,
+  // lists, blockquotes, code blocks) is preserved on paste.
+  //
+  // Handles three flavours of clipboard HTML:
+  //  1. Modern browsers / Google Docs: clean <ul>, <p>, <u>, <b>.
+  //  2. Outlook desktop (Word engine): <p class=MsoListParagraph> with
+  //     margin-left for indent and a Symbol-font '.' for the bullet.
+  //  3. Outlook invalid nesting: <ul> directly inside <ul> (not inside
+  //     <li>) - common when Word emits nested lists.
+  // Also detects inline styles on <span> (text-decoration:underline,
+  // font-weight:bold, etc.) which Word uses instead of <u>/<b>/<i>.
+  function htmlToMarkdown(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const body = doc.body
+    const out = convertBlock(body)
+    return out.replace(/\n{3,}/g, '\n\n').trim() + '\n'
+
+    function convertBlock(node) {
+      let s = ''
+      for (const child of node.childNodes) s += convertNode(child, '')
+      return s
+    }
+
+    function convertNode(node, indent) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        // Collapse runs of whitespace but keep newlines.
+        return node.textContent.replace(/\f/g, '\n').replace(/^[ \t]+|[ \t]+$/g, ' ').replace(/[ \t]+/g, ' ')
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return ''
+
+      const tag = node.tagName.toLowerCase()
+
+      // ---- Block-level elements ---------------------------------
+      if (tag === 'br') return '\n'
+      if (tag === 'hr') return '\n---\n'
+
+      // Outlook / Word list paragraphs: <p class=MsoListParagraph
+      //   style="margin-left:0.5in">. Item</p>. Detect them BEFORE
+      // generic <p> handling so the bullet char and indent are
+      // converted to '- ' markers with proper nesting.
+      if ((tag === 'p' || tag === 'div') && isOutlookListItem(node)) {
+        return convertOutlookListItem(node)
+      }
+
+      if (tag === 'p' || tag === 'div') {
+        const inner = convertInline(node)
+        const trimmed = inner.replace(/^\s+|\s+$/g, '')
+        return trimmed ? '\n' + trimmed + '\n' : '\n'
+      }
+      if (/^h[1-6]$/.test(tag)) {
+        const level = Number(tag[1])
+        const inner = convertInline(node).replace(/^\s+|\s+$/g, '')
+        return inner ? '\n' + '#'.repeat(level) + ' ' + inner + '\n' : ''
+      }
+      if (tag === 'blockquote') {
+        const inner = convertBlock(node).trim()
+        if (!inner) return ''
+        return '\n' + inner.split('\n').map(l => '> ' + l).join('\n') + '\n'
+      }
+      if (tag === 'pre') {
+        const code = node.textContent.replace(/\n+$/, '')
+        return '\n```\n' + code + '\n```\n'
+      }
+      if (tag === 'ul' || tag === 'ol') {
+        return convertList(node, indent)
+      }
+      if (tag === 'li') {
+        // Standalone <li> (rare) - render as unordered item.
+        const inner = convertInline(node).replace(/^\s+|\s+$/g, '')
+        return indent + '- ' + inner + '\n'
+      }
+      if (tag === 'table') {
+        return convertTable(node, indent)
+      }
+      if (tag === 'tr' || tag === 'td' || tag === 'th') {
+        // Outside of convertTable - just unwrap.
+        return convertBlock(node)
+      }
+
+      // ---- Inline elements --------------------------------------
+      return convertInline(node)
+    }
+
+    function convertInline(node) {
+      const tag = node.tagName.toLowerCase()
+      const inner = inlineChildren(node)
+      const trimmed = inner.replace(/^\s+|\s+$/g, '')
+      const leadSpace = inner.match(/^\s+/)
+      const trailSpace = inner.match(/\s+$/)
+      const ls = leadSpace ? leadSpace[0] : ''
+      const ts = trailSpace ? trailSpace[0] : ''
+
+      let wrapped
+      switch (tag) {
+        case 'b':
+        case 'strong':
+          wrapped = trimmed ? '**' + trimmed + '**' : ''
+          break
+        case 'i':
+        case 'em':
+          wrapped = trimmed ? '*' + trimmed + '*' : ''
+          break
+        case 'u':
+        case 'ins':
+          wrapped = trimmed ? '++' + trimmed + '++' : ''
+          break
+        case 's':
+        case 'strike':
+        case 'del':
+          wrapped = trimmed ? '~~' + trimmed + '~~' : ''
+          break
+        case 'code':
+          wrapped = trimmed ? '`' + trimmed + '`' : ''
+          break
+        case 'a': {
+          const href = node.getAttribute('href') || ''
+          if (href && href !== '#' && !isJavascriptUri(href)) {
+            // If the link text and href differ, use standard [text](url) syntax.
+            if (trimmed && trimmed !== href) {
+              wrapped = '[' + trimmed + '](' + href + ')'
+            } else if (trimmed) {
+              wrapped = trimmed
+            } else {
+              wrapped = href
+            }
+          } else {
+            wrapped = trimmed
+          }
+          break
+        }
+        case 'img': {
+          const alt = node.getAttribute('alt') || ''
+          const src = node.getAttribute('src') || ''
+          wrapped = alt ? alt + ' (' + src + ')' : src
+          break
+        }
+        case 'span':
+        case 'font':
+        case 'sub':
+        case 'sup':
+        case 'small':
+        case 'mark':
+        case 'abbr':
+        case 'cite':
+        case 'q':
+        case 'time':
+        case 'label':
+        case 'wbr':
+          // Generic styling containers - but if a Word/Outlook inline
+          // style is set (text-decoration:underline, font-weight:bold,
+          // etc.) honour it instead of just unwrapping.
+          wrapped = applyInlineStyle(node, trimmed)
+          break
+        default:
+          wrapped = inner
+      }
+      return ls + wrapped + ts
+    }
+
+    // Apply Word/Outlook inline-style decorations to the already-
+    // converted inner text. Each detected property adds its markdown
+    // delimiter around the trimmed content. Multiple properties can
+    // stack (e.g. bold + underline -> **++text++**).
+    function applyInlineStyle(node, text) {
+      if (!text) return ''
+      const style = (node.getAttribute('style') || '').toLowerCase()
+      let result = text
+      const decoration = (style.match(/text-decoration\s*:\s*([^;]+)/) || [])[1] || ''
+      const fontWeight  = (style.match(/font-weight\s*:\s*([^;]+)/)  || [])[1] || ''
+      const fontStyle   = (style.match(/font-style\s*:\s*([^;]+)/)   || [])[1] || ''
+      if (/\bunderline\b/.test(decoration))      result = '++' + result + '++'
+      if (/\bline-through\b/.test(decoration))   result = '~~' + result + '~~'
+      if (/^(bold|bolder|[6-9]00)$/.test(fontWeight.trim())) result = '**' + result + '**'
+      if (/^(italic|oblique)$/.test(fontStyle.trim()))       result = '*' + result + '*'
+      return result
+    }
+
+    // Recursively convert children of an inline context. Block children
+    // (p, div, ul, etc.) encountered inside an inline context are
+    // rendered with surrounding newlines so they break the line.
+    function inlineChildren(node) {
+      let s = ''
+      for (const child of node.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          s += child.textContent.replace(/\f/g, '\n').replace(/[ \t]+/g, ' ')
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          const tag = child.tagName.toLowerCase()
+          if (tag === 'br') {
+            s += '\n'
+          } else if (
+            tag === 'p' || tag === 'div' || tag === 'ul' || tag === 'ol' ||
+            tag === 'blockquote' || tag === 'pre' || tag === 'hr' ||
+            tag === 'table' || /^h[1-6]$/.test(tag)
+          ) {
+            s += '\n' + convertNode(child, '') + '\n'
+          } else {
+            s += convertInline(child)
+          }
+        }
+      }
+      return s
+    }
+
+    function convertList(listNode, indent) {
+      const isOrdered = listNode.tagName.toLowerCase() === 'ol'
+      let s = '\n'
+      let i = 1
+      for (const child of listNode.children) {
+        const tag = child.tagName.toLowerCase()
+        if (tag === 'li') {
+          // Pull out nested lists so they can be rendered as indented items.
+          const nestedLists = []
+          const clone = child.cloneNode(true)
+          const nested = clone.querySelectorAll('ul, ol')
+          for (const n of nested) {
+            nestedLists.push(n.cloneNode(true))
+            n.remove()
+          }
+          const content = inlineChildren(clone).replace(/^\s+|\s+$/g, '').replace(/\n+/g, ' ')
+          const marker = isOrdered ? i + '.' : '-'
+          s += indent + marker + ' ' + content + '\n'
+          for (const nestedList of nestedLists) {
+            s += convertList(nestedList, indent + '  ')
+          }
+          i++
+        } else if (tag === 'ul' || tag === 'ol') {
+          // Outlook / Word invalid nesting: a <ul> directly inside a
+          // <ul> (not wrapped in <li>). Recurse with deeper indent so
+          // sub-bullets are preserved instead of being dropped.
+          s += convertList(child, indent + '  ')
+        }
+        // else: ignore unknown children (whitespace text nodes are
+        // already filtered by .children).
+      }
+      return s
+    }
+
+    // ---- Outlook / Word list paragraph support -------------------
+    // Word emits bullets as <p class=MsoListParagraph style="margin-left:Xin">
+    // with a Symbol-font '.' (or 'o', etc.) as the bullet glyph.
+    // There is no <ul>/<li> at all - the list structure is encoded in
+    // the class + margin-left. We reconstruct '- item' lines with the
+    // indent level derived from margin-left (each 0.5in = 1 level,
+    // first level at 0.5in = indent 0).
+    function isOutlookListItem(p) {
+      const cls = (p.getAttribute('class') || '').toLowerCase()
+      if (/\bmsolistparagraph\b/.test(cls)) return true
+      // Also catch paragraphs that just start with a bullet glyph,
+      // even without the class - common when copying rendered email.
+      const text = (p.textContent || '').replace(/^\s+/, '')
+      if (/^[·•◦▪○●‣⁃▪]\s+/.test(text)) return true
+      return false
+    }
+
+    function outlookListLevel(p) {
+      const style = p.getAttribute('style') || ''
+      const m = style.match(/margin-left\s*:\s*([0-9.]+)\s*(pt|in|px|cm)/i)
+      if (!m) return 0
+      const val = parseFloat(m[1])
+      const unit = m[2].toLowerCase()
+      let inches
+      if (unit === 'pt') inches = val / 72
+      else if (unit === 'in') inches = val
+      else if (unit === 'px') inches = val / 96
+      else if (unit === 'cm') inches = val / 2.54
+      else inches = 0
+      // Each 0.5in of margin = one indent level. Round to nearest int,
+      // clamp to >= 0. Subtract 1 because the first level (0.5in)
+      // should be indent 0 (top-level bullet).
+      const level = Math.round(inches / 0.5) - 1
+      return Math.max(0, level)
+    }
+
+    function outlookListItemMarker(p) {
+      const text = (p.textContent || '').replace(/^\s+/, '')
+      // Numbered Word list? ('1.' / '1)')
+      const num = text.match(/^(\d+)([.)])/)
+      if (num) return num[1] + num[2]
+      return '-'
+    }
+
+    function outlookListItemText(p) {
+      // Strip the leading bullet glyph and any whitespace that follows
+      // it. Also strip a leading numbered prefix (which becomes the
+      // marker via outlookListItemMarker).
+      let text = inlineChildren(p).replace(/^\s+|\s+$/g, '')
+      // Remove leading bullet glyph + following whitespace.
+      text = text.replace(/^[·•◦▪○●‣⁃▪]\s*/, '')
+      // Remove leading '1.' / '1)' if present.
+      text = text.replace(/^\d+[.)]\s+/, '')
+      // Collapse internal whitespace runs to single spaces.
+      text = text.replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '')
+      return text
+    }
+
+    function convertOutlookListItem(p) {
+      const level = outlookListLevel(p)
+      const marker = outlookListItemMarker(p)
+      const text = outlookListItemText(p)
+      const indent = '  '.repeat(level)
+      return '\n' + indent + marker + ' ' + text + '\n'
+    }
+
+    function convertTable(tableNode, indent) {
+      // Render as tab-separated rows. This loses column alignment but
+      // preserves the data in a paste-friendly form.
+      const rows = tableNode.querySelectorAll('tr')
+      if (!rows.length) return ''
+      let s = '\n'
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td, th')
+        const texts = []
+        cells.forEach(cell => {
+          texts.push(inlineChildren(cell).replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, ''))
+        })
+        s += indent + texts.join('\t') + '\n'
+      })
+      return s
+    }
+
+    function isJavascriptUri(s) {
+      return /^javascript:/i.test(s)
+    }
+  }
+
+  function Editor(element, highlight) {
+    const listeners = []
+    const history = []
+    let at = -1, prev
+
+    const debounceHighlight = debounce(30, () => {
+      const pos = save()
+      highlight(element)
+      restore(pos)
+    })
+
+    const shouldRecord = (event) => {
+      return !isUndo(event) && !isRedo(event)
+        && event.key !== 'Meta'
+        && event.key !== 'Control'
+        && event.key !== 'Alt'
+        && !event.key.startsWith('Arrow')
+    }
+
+    let recording = false
+    const debounceRecordHistory = debounce(300, (event) => {
+      if (shouldRecord(event)) {
+        recordHistory()
+        recording = false
+      }
+    })
+
+    const on = (type, fn) => {
+      listeners.push([type, fn])
+      element.addEventListener(type, fn)
+    }
+    on('keydown', event => {
+      if (event.defaultPrevented) return
+      prev = toString()
+
+      if (event.key === 'Tab') {
+        preventDefault(event)
+        indentSelection(event.shiftKey)
+        return
+      }
+
+      if (event.key === 'Enter') {
+        const action = nextListAction()
+        if (action?.exit) {
+          preventDefault(event)
+          exitList()
+          return
+        }
+        if (action?.prefix) {
+          preventDefault(event)
+          insertText(`\n${action.prefix}`)
+          return
+        }
+      }
+
+      if (isUndo(event)) doUndo(event)
+      if (isRedo(event)) doRedo(event)
+      if (shouldRecord(event) && !recording) {
+        recordHistory()
+        recording = true
+      }
+    })
+    on('keyup', event => {
+      if (event.defaultPrevented) return
+      if (event.isComposing) return
+      if (prev !== toString()) debounceHighlight()
+      debounceRecordHistory(event)
+    })
+    on('paste', event => {
+      // Intercept paste so we can convert clipboard HTML (from Word,
+      // Google Docs, Outlook, etc.) into the app's markdown syntax.
+      // This keeps underlines, sub-bullets, bold, italic, strike,
+      // headings, and code blocks when pasting from rich-text sources.
+      const cd = event.clipboardData
+      if (cd) {
+        const htmlData = cd.getData('text/html')
+        const textData = cd.getData('text/plain')
+        let insert = textData
+        if (htmlData && htmlData.trim()) {
+          try {
+            const converted = htmlToMarkdown(htmlData)
+            // Trim leading/trailing newlines so a single pasted word
+            // (e.g. an underlined span from Outlook) doesn't break the
+            // current line. Internal paragraph breaks are preserved.
+            const stripped = converted.replace(/^\n+|\n+$/g, '')
+            if (stripped.trim()) insert = stripped
+          } catch (e) {
+            // fall back to plain text on any conversion error
+            insert = textData
+          }
+        }
+        // Convert any bare URLs (in the plain-text insertion) into
+        // markdown links with smart titles. We only do this for plain-
+        // text pastes (i.e. when we didn't go through htmlToMarkdown)
+        // - because htmlToMarkdown already preserves links from rich
+        // sources and we don't want to double-convert them.
+        //
+        // Skip lines that already contain markdown link syntax, so we
+        // don't touch [text](url) patterns that came in via the
+        // clipboard or were already typed by the user.
+        if (insert === textData) {
+          insert = convertBareUrls(insert)
+        }
+        event.preventDefault()
+        insertText(insert)
+        debounceHighlight()
+        setTimeout(recordHistory, 10)
+        return
+      }
+      setTimeout(recordHistory, 10)
+    })
+    on('cut', () => setTimeout(recordHistory, 10))
+    on('beforeinput', event => {
+      if (event.inputType === 'historyUndo') doUndo(event)
+      if (event.inputType === 'historyRedo') doRedo(event)
+    })
+
+    function nextListAction() {
+      const pos = save()
+      const text = toString()
+      const before = text.slice(0, pos.start)
+      const lineStart = before.lastIndexOf('\n') + 1
+      const line = before.slice(lineStart)
+      // Only '-' is treated as an unordered bullet marker (the user
+      // does not want '+' or '*' to start bullets, since '+' is used
+      // for underline (++text++) and '*' for bold/italic).
+      const unordered = line.match(/^(\s*)(-)\s+(.*)$/)
+      if (unordered) {
+        if (!unordered[3].trim()) return {exit: true}
+        return {prefix: `${unordered[1]}${unordered[2]} `}
+      }
+
+      const ordered = line.match(/^(\s*)(\d+)([.)])\s+(.*)$/)
+      if (ordered) {
+        if (!ordered[4].trim()) return {exit: true}
+        return {prefix: `${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]} `}
+      }
+
+      return null
+    }
+
+    function exitList() {
+      const pos = save()
+      const text = toString()
+      const before = text.slice(0, pos.start)
+      const lineStart = before.lastIndexOf('\n') + 1
+      const newText = text.slice(0, lineStart) + '\n' + text.slice(pos.end)
+      const caret = lineStart + 1
+      element.textContent = newText
+      highlight(element)
+      restore({start: caret, end: caret, dir: '->'})
+    }
+
+    function insertText(text) {
+      const s = getSelection()
+      if (!s || !s.rangeCount) {
+        element.textContent = (element.textContent || '') + text
+        element.normalize()
+        return
+      }
+
+      const range = s.getRangeAt(0)
+      range.deleteContents()
+      const node = document.createTextNode(text)
+      range.insertNode(node)
+      range.setStartAfter(node)
+      range.collapse(true)
+      s.removeAllRanges()
+      s.addRange(range)
+      element.normalize()
+    }
+
+    function indentSelection(outdent) {
+      const pos = save()
+      const text = toString()
+      const start = Math.min(pos.start, pos.end)
+      const end = Math.max(pos.start, pos.end)
+      const blockStart = text.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+      let blockEnd = text.indexOf('\n', end)
+      if (blockEnd === -1) blockEnd = text.length
+      else blockEnd += 1
+
+      const block = text.slice(blockStart, blockEnd)
+      const lines = block.split('\n')
+      const transforms = []
+      let transformed = ''
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        const nextLine = outdent
+          ? line.replace(/^\t/, '').replace(/^ {1,2}/, '')
+          : `  ${line}`
+        transforms.push(nextLine.length - line.length)
+        transformed += nextLine
+        if (i < lines.length - 1) transformed += '\n'
+      }
+
+      const totalDelta = transforms.reduce((sum, delta) => sum + delta, 0)
+      const mapPos = value => {
+        if (value < blockStart) return value
+        if (value > blockEnd) return value + totalDelta
+
+        let shift = 0
+        let lineStart = blockStart
+        for (let i = 0; i < lines.length; i++) {
+          if (value >= lineStart) shift += transforms[i]
+          lineStart += lines[i].length + 1
+        }
+        return value + shift
+      }
+
+      element.textContent = text.slice(0, blockStart) + transformed + text.slice(blockEnd)
+      highlight(element)
+      restore({start: mapPos(pos.start), end: mapPos(pos.end), dir: pos.dir})
+    }
+
+    function save() {
+      const s = getSelection()
+      const pos = {start: 0, end: 0, dir: undefined}
+      let {anchorNode, anchorOffset, focusNode, focusOffset} = s
+      if (!anchorNode || !focusNode) throw 'error1'
+      if (anchorNode === element && focusNode === element) {
+        pos.start = (anchorOffset > 0 && element.textContent) ? element.textContent.length : 0
+        pos.end = (focusOffset > 0 && element.textContent) ? element.textContent.length : 0
+        pos.dir = (focusOffset >= anchorOffset) ? '->' : '<-'
+        return pos
+      }
+      if (anchorNode.nodeType === Node.ELEMENT_NODE) {
+        const node = document.createTextNode('')
+        anchorNode.insertBefore(node, anchorNode.childNodes[anchorOffset])
+        anchorNode = node
+        anchorOffset = 0
+      }
+      if (focusNode.nodeType === Node.ELEMENT_NODE) {
+        const node = document.createTextNode('')
+        focusNode.insertBefore(node, focusNode.childNodes[focusOffset])
+        focusNode = node
+        focusOffset = 0
+      }
+      visit(element, el => {
+        if (el === anchorNode && el === focusNode) {
+          pos.start += anchorOffset
+          pos.end += focusOffset
+          pos.dir = anchorOffset <= focusOffset ? '->' : '<-'
+          return 'stop'
+        }
+        if (el === anchorNode) {
+          pos.start += anchorOffset
+          if (!pos.dir) {
+            pos.dir = '->'
+          } else {
+            return 'stop'
+          }
+        } else if (el === focusNode) {
+          pos.end += focusOffset
+          if (!pos.dir) {
+            pos.dir = '<-'
+          } else {
+            return 'stop'
+          }
+        }
+        if (el.nodeType === Node.TEXT_NODE) {
+          if (pos.dir !== '->') pos.start += el.nodeValue.length
+          if (pos.dir !== '<-') pos.end += el.nodeValue.length
+        }
+      })
+
+      element.normalize()
+      return pos
+    }
+
+    function restore(pos) {
+      const s = getSelection()
+      let startNode, startOffset = 0
+      let endNode, endOffset = 0
+
+      if (!pos.dir) pos.dir = '->'
+      if (pos.start < 0) pos.start = 0
+      if (pos.end < 0) pos.end = 0
+
+      if (pos.dir === '<-') {
+        const {start, end} = pos
+        pos.start = end
+        pos.end = start
+      }
+
+      let current = 0
+
+      visit(element, el => {
+        if (el.nodeType !== Node.TEXT_NODE) return
+
+        const len = (el.nodeValue || '').length
+        if (current + len > pos.start) {
+          if (!startNode) {
+            startNode = el
+            startOffset = pos.start - current
+          }
+          if (current + len > pos.end) {
+            endNode = el
+            endOffset = pos.end - current
+            return 'stop'
+          }
+        }
+        current += len
+      })
+
+      if (!startNode) {
+        startNode = element
+        startOffset = element.childNodes.length
+      }
+      if (!endNode) {
+        endNode = element
+        endOffset = element.childNodes.length
+      }
+
+      if (pos.dir === '<-') {
+        [startNode, startOffset, endNode, endOffset] = [endNode, endOffset, startNode, startOffset]
+      }
+
+      {
+        const startEl = uneditable(startNode)
+        if (startEl) {
+          const node = document.createTextNode('')
+          startEl.parentNode?.insertBefore(node, startEl)
+          startNode = node
+          startOffset = 0
+        }
+        const endEl = uneditable(endNode)
+        if (endEl) {
+          const node = document.createTextNode('')
+          endEl.parentNode?.insertBefore(node, endEl)
+          endNode = node
+          endOffset = 0
+        }
+      }
+
+      s.setBaseAndExtent(startNode, startOffset, endNode, endOffset)
+      element.normalize()
+    }
+
+    function uneditable(node) {
+      while (node && node !== element) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          if (node.getAttribute('contenteditable') === 'false') {
+            return node
+          }
+        }
+        node = node.parentNode
+      }
+    }
+
+    function doUndo(event) {
+      preventDefault(event)
+      at--
+      const record = history[at]
+      if (record) {
+        element.innerHTML = record.html
+        restore(record.pos)
+      }
+      if (at < 0) at = 0
+    }
+
+    function doRedo(event) {
+      preventDefault(event)
+      at++
+      const record = history[at]
+      if (record) {
+        element.innerHTML = record.html
+        restore(record.pos)
+      }
+      if (at >= history.length) at--
+    }
+
+    function recordHistory() {
+      const html = element.innerHTML
+      const pos = save()
+      const lastRecord = history[at]
+      if (
+        lastRecord
+        && lastRecord.html === html
+        && lastRecord.pos.start === pos.start
+        && lastRecord.pos.end === pos.end
+      ) return
+      at++
+      history[at] = {html, pos}
+      history.splice(at + 1)
+      const maxHistory = 10_000
+      if (at > maxHistory) {
+        at = maxHistory
+        history.splice(0, 1)
+      }
+    }
+
+    function visit(editor, visitor) {
+      const queue = []
+      if (editor.firstChild) queue.push(editor.firstChild)
+      let el = queue.pop()
+      while (el) {
+        if (visitor(el) === 'stop') break
+        if (el.nextSibling) queue.push(el.nextSibling)
+        if (el.firstChild) queue.push(el.firstChild)
+        el = queue.pop()
+      }
+    }
+
+    function isCtrl(event) {
+      return event.metaKey || event.ctrlKey
+    }
+
+    function isUndo(event) {
+      return isCtrl(event) && !event.shiftKey && event.code === 'KeyZ'
+    }
+
+    function isRedo(event) {
+      return isCtrl(event) && event.shiftKey && event.code === 'KeyZ'
+    }
+
+    function toString() {
+      return element.textContent || ''
+    }
+
+    function preventDefault(event) {
+      event.preventDefault()
+    }
+
+    function getSelection() {
+      return element.getRootNode().getSelection()
+    }
+
+    return {
+      set(content) {
+        element.textContent = content
+        highlight(element)
+      },
+      destroy() {
+        for (const [type, fn] of listeners) editor.removeEventListener(type, fn)
+      },
+    }
+  }
+</script>
+<svg style="display: none" aria-hidden="true" focusable="false">
+  <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"
+          class="icon icon-tabler icons-tabler-outline icon-tabler-plus">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path d="M12 5l0 14"/>
+    <path d="M5 12l14 0"/>
+  </symbol>
+  <symbol id="icon-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"
+          stroke-linecap="round"
+          stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path d="M8 9h-1a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-8a2 2 0 0 0 -2 -2h-1"/>
+    <path d="M12 14v-11"/>
+    <path d="M9 6l3 -3l3 3"/>
+  </symbol>
+  <symbol id="icon-qrcode" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path d="M4 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4"/>
+    <path d="M7 17l0 .01"/>
+    <path d="M14 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4"/>
+    <path d="M7 7l0 .01"/>
+    <path d="M4 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4"/>
+    <path d="M17 7l0 .01"/>
+    <path d="M14 14l3 0"/>
+    <path d="M20 14l0 .01"/>
+    <path d="M14 14l0 3"/>
+    <path d="M14 20l3 0"/>
+    <path d="M17 17l3 0"/>
+    <path d="M20 17l0 3"/>
+  </symbol>
+  <symbol id="icon-github" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path
+      d="M9 19c-4.3 1.4 -4.3 -2.5 -6 -3m12 5v-3.5c0 -1 .1 -1.4 -.5 -2c2.8 -.3 5.5 -1.4 5.5 -6a4.6 4.6 0 0 0 -1.3 -3.2a4.2 4.2 0 0 0 -.1 -3.2s-1.1 -.3 -3.5 1.3a12.3 12.3 0 0 0 -6.2 0c-2.4 -1.6 -3.5 -1.3 -3.5 -1.3a4.2 4.2 0 0 0 -.1 3.2a4.6 4.6 0 0 0 -1.3 3.2c0 4.6 2.7 5.7 5.5 6c-.6 .6 -.6 1.2 -.5 2v3.5"/>
+  </symbol>
+  <symbol id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <rect x="8" y="8" width="12" height="12" rx="2"/>
+    <path d="M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2"/>
+  </symbol>
+  <symbol id="icon-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path d="M4 7l16 0"/>
+    <path d="M10 11l0 6"/>
+    <path d="M14 11l0 6"/>
+    <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12"/>
+    <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"/>
+  </symbol>
+  <symbol id="icon-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path d="M5 4h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2z"/>
+  </symbol>
+  <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+    <path d="M20 11a8 8 0 1 0 -2 5.3"/>
+    <path d="M20 20v-4h-4"/>
+  </symbol>
+  <symbol id="icon-empty" viewBox="0 0 24 24"></symbol>
+</svg>
