@@ -462,6 +462,35 @@
   })
   addEventListener('DOMContentLoaded', load)
   addEventListener('load', () => new MutationObserver(save).observe(article, {attributeFilter: ['style']}))
+
+  // Request folder permission on the first user interaction with the
+  // editor. requestPermission() requires a direct user gesture - it
+  // can't be called from a debounced timer (which is where save() ->
+  // syncDoc() -> ensureFolderPermission() runs). So we grab permission
+  // proactively here, on the first keydown/pointerdown. After it's
+  // granted once, ensureFolderPermission() sees 'granted' and the
+  // debounce path works fine.
+  //
+  // We don't use {once: true} because restoreLinkedFolder() runs async
+  // and linkedFolderHandle may not be set yet when the first gesture
+  // fires. We keep listening until permission is granted (or until
+  // it's clear there's no linked folder).
+  let permissionGranted = false
+  function requestPermissionOnce() {
+    if (permissionGranted) return
+    if (!linkedFolderHandle) return  // not linked yet, or never
+    ensureFolderPermission().then(granted => {
+      if (granted) {
+        permissionGranted = true
+        console.log('[folder sync] permission granted on user gesture')
+        article.removeEventListener('keydown', requestPermissionOnce)
+        article.removeEventListener('pointerdown', requestPermissionOnce)
+      }
+    })
+  }
+  article.addEventListener('keydown', requestPermissionOnce)
+  article.addEventListener('pointerdown', requestPermissionOnce)
+
   addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyS') {
       e.preventDefault()
