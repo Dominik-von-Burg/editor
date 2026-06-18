@@ -475,11 +475,17 @@
   // "the page is going away"; visibilitychange:hidden catches the
   // mobile case where the tab is backgrounded and frozen without
   // firing unload events.
-  addEventListener('pagehide', save)
-  addEventListener('beforeunload', save)
+  //
+  // IMPORTANT: pass skipFileSync=true. localStorage writes are
+  // synchronous and safe on unload, but syncDocToFile starts an async
+  // file write that may complete after the user has switched to an
+  // external editor - clobbering their edit. The file will be synced
+  // on the next user-initiated save (when they type again).
+  addEventListener('pagehide', () => save(true))
+  addEventListener('beforeunload', () => save(true))
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      save()
+      save(true)
     } else if (document.visibilityState === 'visible') {
       // Tab refocused - an AI agent / external tool may have edited
       // files in the linked folder while we were away. Pull in any
@@ -491,6 +497,7 @@
   async function load() {
     docs = loadDocs()
     loadDocFilenames()
+    loadLastFileSyncAt()
     if (!Object.keys(docs).length) {
       createDoc({content: '', style: null}, false)
     }
@@ -525,7 +532,14 @@
     updateTitle()
   }
 
-  function save() {
+  // Save the current doc to localStorage. If skipFileSync is false
+  // (default), also sync to the linked folder. When called from unload
+  // handlers (pagehide, beforeunload, visibilitychange:hidden), pass
+  // skipFileSync=true to avoid starting an async file write that might
+  // complete after the user has switched to an external editor and
+  // edited the file - that race would clobber the external edit.
+  // localStorage writes are synchronous so they're safe on unload.
+  function save(skipFileSync = false) {
     if (!currentDocId || !docs[currentDocId]) {
       const doc = createDoc({content: '', style: null}, false)
       currentDocId = doc.id
@@ -546,8 +560,11 @@
     renderDocSelector()
 
     // Sync to linked folder (no-op if none linked). Fire-and-forget;
-    // errors are surfaced inside syncDocToFile.
-    syncDocToFile(doc)
+    // errors are surfaced inside syncDocToFile. Skipped on unload to
+    // avoid the race described above.
+    if (!skipFileSync) {
+      syncDocToFile(doc)
+    }
   }
 
   function openDoc(id) {
@@ -809,6 +826,11 @@
   // Per-doc filename tracking so renames (title change) can delete the
   // old file when the slug changes. Maps docId -> filename (with .md).
   const docFilenames = {}  // populated from localStorage on load
+  // Per-doc timestamp of the last time WE wrote to or read from the
+  // file. Used for conflict detection: if the file's mtime is newer
+  // than this, someone else (AI agent, external editor) modified it
+  // since we last touched it. Maps docId -> ms timestamp.
+  const lastFileSyncAt = {}
 
   // Check whether folder sync is usable in the current browser AND
   // origin. The File System Access API requires a secure context
@@ -906,6 +928,19 @@
     catch (e) { /* ignore */ }
   }
 
+  function loadLastFileSyncAt() {
+    try {
+      const raw = localStorage.getItem('notes-last-file-sync')
+      const parsed = raw ? JSON.parse(raw) : {}
+      Object.assign(lastFileSyncAt, parsed)
+    } catch (e) { /* ignore */ }
+  }
+
+  function persistLastFileSyncAt() {
+    try { localStorage.setItem('notes-last-file-sync', JSON.stringify(lastFileSyncAt)) }
+    catch (e) { /* ignore */ }
+  }
+
   // Convert a doc title to a filesystem-safe slug.
   // "First Alert - Process" -> "First-Alert-Process.md"
   // Disambiguates with a short doc-id suffix when titles collide.
@@ -928,6 +963,17 @@
   // previously had a different filename, the old file is deleted.
   // save() is a user gesture, so we can request permission here if
   // needed.
+  //
+  // CONFLICT DETECTION: before writing, we check the file's current
+  // mtime against lastFileSyncAt[doc.id]. If the file was modified
+  // externally (mtime newer than our last sync), we READ the file
+  // and update the doc with its content (file wins), then SKIP the
+  // write. This prevents the race where:
+  //   1. save() calls syncDocToFile (async write starts)
+  //   2. user switches to external editor, edits the file
+  //   3. our async write completes, overwriting the user's edit
+  // With this check, step 3 detects the external edit and preserves
+  // it instead of clobbering it.
   async function syncDocToFile(doc) {
     if (!linkedFolderHandle || !doc) return
     if (!(await ensureFolderPermission())) return
@@ -939,12 +985,58 @@
       if (oldFilename && oldFilename !== newFilename) {
         try { await linkedFolderHandle.removeEntry(oldFilename) }
         catch (e) { /* old file may not exist - ignore */ }
+        // Old sync tracking is irrelevant for the new filename.
+        delete lastFileSyncAt[doc.id]
       }
 
       const fileHandle = await linkedFolderHandle.getFileHandle(newFilename, {create: true})
+
+      // Conflict detection: read the file's current mtime and compare
+      // to the last time we synced this doc. If the file was modified
+      // externally, read its content and update the doc (file wins).
+      const lastSync = lastFileSyncAt[doc.id] || 0
+      try {
+        const existingFile = await fileHandle.getFile()
+        const existingMtime = existingFile.lastModified
+        if (existingMtime > lastSync) {
+          // File was modified since we last synced - potential conflict
+          const fileText = await existingFile.text()
+          if (fileText !== (doc.content || '')) {
+            // Genuine conflict: file content differs from doc content.
+            // File wins - update the doc from the file and skip the write.
+            console.log(`[folder sync] external edit detected in ${newFilename}, updating doc from file`)
+            doc.content = fileText
+            doc.title = extractTitle(fileText)
+            doc.updatedAt = existingMtime
+            docs[doc.id] = doc
+            persistDocs()
+            lastFileSyncAt[doc.id] = existingMtime
+            persistLastFileSyncAt()
+            docFilenames[doc.id] = newFilename
+            persistDocFilenames()
+            if (doc.id === currentDocId) {
+              applyDoc(doc)
+            }
+            notify(`External edit in ${newFilename} - updated from file`)
+            return  // skip the write - file is already correct
+          }
+          // Content matches - no real conflict, just update our tracking.
+          lastFileSyncAt[doc.id] = existingMtime
+        }
+      } catch (e) {
+        // File might not exist yet (first sync) - proceed with write.
+      }
+
       const writable = await fileHandle.createWritable()
       await writable.write(doc.content || '')
       await writable.close()
+
+      // Record the file's new mtime so we can detect future external edits.
+      try {
+        const updatedFile = await fileHandle.getFile()
+        lastFileSyncAt[doc.id] = updatedFile.lastModified
+        persistLastFileSyncAt()
+      } catch (e) { /* ignore - tracking is best-effort */ }
 
       docFilenames[doc.id] = newFilename
       persistDocFilenames()
@@ -1012,6 +1104,10 @@
             docs[docId].content = text
             docs[docId].title = extractTitle(text)
             docs[docId].updatedAt = fileMtime
+            // Track that we've synced from the file at this mtime, so
+            // syncDocToFile's conflict check knows the file's current
+            // state is "ours" and won't treat it as an external edit.
+            lastFileSyncAt[docId] = fileMtime
             updatedCount++
             // If this is the current doc, refresh the editor view
             if (docId === currentDocId) {
@@ -1024,6 +1120,7 @@
           for (const [id, doc] of Object.entries(docs)) {
             if (!docFilenames[id] && doc.content === text) {
               docFilenames[id] = entry.name
+              lastFileSyncAt[id] = fileMtime
               matched = true
               break
             }
@@ -1032,6 +1129,7 @@
             // Genuinely new file - create a new doc
             const doc = createDoc({content: text, style: null}, false)
             docFilenames[doc.id] = entry.name
+            lastFileSyncAt[doc.id] = fileMtime
             newCount++
           }
         }
@@ -1039,6 +1137,7 @@
 
       persistDocs()
       persistDocFilenames()
+      persistLastFileSyncAt()
       renderRecentDocs()
       renderDocSelector()
 
