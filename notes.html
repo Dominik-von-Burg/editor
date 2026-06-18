@@ -455,6 +455,24 @@
   let docs = loadDocs()
   let currentDocId = localStorage.getItem(currentDocKey)
 
+  // Sync to folder on input. The input event is a user gesture, so
+  // requestPermission() can be called from here (but NOT from the
+  // debounced save() timer). We grab permission on the first input
+  // if needed, then the debounced save() -> syncDoc() path works
+  // because queryPermission() returns 'granted'.
+  //
+  // Also grab permission on any pointerdown on the document, so that
+  // even if the user just clicks around (without typing), we get
+  // permission for auto-syncs (visibilitychange reads, etc.).
+  function grabPermissionOnGesture() {
+    if (!linkedFolderHandle) return
+    if (_permissionPromise) return
+    ensureFolderPermission().then(granted => {
+      if (granted) console.log('[folder sync] permission granted')
+    })
+  }
+  article.addEventListener('input', grabPermissionOnGesture)
+  document.addEventListener('pointerdown', grabPermissionOnGesture)
   article.addEventListener('input', debounce(500, save))
   article.addEventListener('blur', save)
   article.addEventListener('click', event => {
@@ -462,34 +480,6 @@
   })
   addEventListener('DOMContentLoaded', load)
   addEventListener('load', () => new MutationObserver(save).observe(article, {attributeFilter: ['style']}))
-
-  // Request folder permission on the first user interaction with the
-  // editor. requestPermission() requires a direct user gesture - it
-  // can't be called from a debounced timer (which is where save() ->
-  // syncDoc() -> ensureFolderPermission() runs). So we grab permission
-  // proactively here, on the first keydown/pointerdown. After it's
-  // granted once, ensureFolderPermission() sees 'granted' and the
-  // debounce path works fine.
-  //
-  // We don't use {once: true} because restoreLinkedFolder() runs async
-  // and linkedFolderHandle may not be set yet when the first gesture
-  // fires. We keep listening until permission is granted (or until
-  // it's clear there's no linked folder).
-  let permissionGranted = false
-  function requestPermissionOnce() {
-    if (permissionGranted) return
-    if (!linkedFolderHandle) return  // not linked yet, or never
-    ensureFolderPermission().then(granted => {
-      if (granted) {
-        permissionGranted = true
-        console.log('[folder sync] permission granted on user gesture')
-        article.removeEventListener('keydown', requestPermissionOnce)
-        article.removeEventListener('pointerdown', requestPermissionOnce)
-      }
-    })
-  }
-  article.addEventListener('keydown', requestPermissionOnce)
-  article.addEventListener('pointerdown', requestPermissionOnce)
 
   addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyS') {
@@ -943,18 +933,40 @@
     return base + '-' + (docId || '').slice(0, 6) + '.md'
   }
 
-  // Ensure we have readwrite permission on the folder. Must be called
-  // from within a user gesture (click, typing) so requestPermission()
-  // can prompt. Returns true if granted.
+  // Ensure we have readwrite permission on the folder. If called from
+  // a user gesture (input, click), can call requestPermission() to
+  // prompt. If called from a timer (debounced save), will wait for
+  // any in-flight permission request started by a user gesture.
+  // Returns true if granted.
+  let _permissionPromise = null
   async function ensureFolderPermission() {
     if (!linkedFolderHandle) return false
+    // If a permission request is already in flight (started by a
+    // user gesture), wait for it instead of starting a competing one.
+    if (_permissionPromise) return _permissionPromise
     try {
       const perm = await linkedFolderHandle.queryPermission({mode: 'readwrite'})
       if (perm === 'granted') return true
-      const requested = await linkedFolderHandle.requestPermission({mode: 'readwrite'})
-      if (requested === 'granted') return true
-      notify('Folder permission denied. Click "Unlink folder" and re-link to retry.')
-      return false
+      // Permission is 'prompt' - try to request it. This only works
+      // from within a user gesture; from a timer it will return
+      // 'prompt' again (no error, just no grant).
+      _permissionPromise = (async () => {
+        try {
+          const requested = await linkedFolderHandle.requestPermission({mode: 'readwrite'})
+          if (requested === 'granted') return true
+          return false
+        } finally {
+          _permissionPromise = null
+        }
+      })()
+      const granted = await _permissionPromise
+      if (!granted) {
+        // Only notify if we're likely in a user gesture context. From
+        // a timer, requesting silently fails - no point notifying.
+        // We can't reliably detect this, so skip the notification
+        // and let the user-gesture path handle prompting.
+      }
+      return granted
     } catch (e) {
       console.error('[folder sync] ensureFolderPermission failed:', e)
       return false
