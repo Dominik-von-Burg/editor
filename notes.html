@@ -469,18 +469,10 @@
     }
   })
 
-  // Flush save on page unload. Without this, any edits made in the
-  // last 500ms (the debounce window) are lost on reload / tab close /
-  // navigation. pagehide fires reliably on desktop and mobile for
-  // "the page is going away"; visibilitychange:hidden catches the
-  // mobile case where the tab is backgrounded and frozen without
-  // firing unload events.
-  //
-  // IMPORTANT: pass skipFileSync=true. localStorage writes are
-  // synchronous and safe on unload, but syncDocToFile starts an async
-  // file write that may complete after the user has switched to an
-  // external editor - clobbering their edit. The file will be synced
-  // on the next user-initiated save (when they type again).
+  // Flush save on page unload. Without this, edits made in the last
+  // 500ms (the debounce window) are lost on reload / tab close.
+  // skipFileSync=true because the async file write may complete after
+  // the user has switched to an external editor (race condition).
   addEventListener('pagehide', () => save(true))
   addEventListener('beforeunload', () => save(true))
   document.addEventListener('visibilitychange', () => {
@@ -496,8 +488,7 @@
 
   async function load() {
     docs = loadDocs()
-    loadDocFilenames()
-    loadFileContentHash()
+    migrateOldSyncMaps()
     if (!Object.keys(docs).length) {
       createDoc({content: '', style: null}, false)
     }
@@ -505,9 +496,6 @@
     applyDoc(doc)
     renderRecentDocs()
     renderDocSelector()
-    // Try to restore the linked folder handle (saved in IndexedDB)
-    // and pull in any changes from .md files. Fire-and-forget so the
-    // page is interactive immediately.
     restoreLinkedFolder()
   }
 
@@ -533,12 +521,9 @@
   }
 
   // Save the current doc to localStorage. If skipFileSync is false
-  // (default), also sync to the linked folder. When called from unload
-  // handlers (pagehide, beforeunload, visibilitychange:hidden), pass
-  // skipFileSync=true to avoid starting an async file write that might
-  // complete after the user has switched to an external editor and
-  // edited the file - that race would clobber the external edit.
-  // localStorage writes are synchronous so they're safe on unload.
+  // (default), also sync to the linked folder. Unload handlers pass
+  // skipFileSync=true because the async file write may complete after
+  // the user has switched to an external editor (race condition).
   function save(skipFileSync = false) {
     if (!currentDocId || !docs[currentDocId]) {
       const doc = createDoc({content: '', style: null}, false)
@@ -559,12 +544,7 @@
     renderRecentDocs()
     renderDocSelector()
 
-    // Sync to linked folder (no-op if none linked). Fire-and-forget;
-    // errors are surfaced inside syncDocToFile. Skipped on unload to
-    // avoid the race described above.
-    if (!skipFileSync) {
-      syncDocToFile(doc)
-    }
+    if (!skipFileSync) syncDoc(doc)
   }
 
   function openDoc(id) {
@@ -596,20 +576,17 @@
     }
     const doc = docs[currentDocId]
     const title = getDocTitle(doc)
-    // Use the browser's native confirm dialog. It blocks until the
-    // user decides, which is what we want for a destructive action.
-    // The message includes the doc title (truncated) so the user
-    // knows exactly what they're deleting.
     const shortTitle = title.length > 60 ? title.slice(0, 57) + '...' : title
     if (!confirm('Delete "' + shortTitle + '"?\n\nThis cannot be undone.')) {
       return
     }
 
+    // Delete the corresponding .md file from the linked folder.
+    deleteDocFile(doc)
+
     delete docs[currentDocId]
     persistDocs()
 
-    // If we deleted the current doc, switch to the most recent
-    // remaining one - or create a fresh empty doc if none are left.
     const remaining = sortedDocs()
     if (remaining.length) {
       currentDocId = remaining[0].id
@@ -745,6 +722,8 @@
           content,
           style: typeof doc.style === 'string' ? doc.style : null,
           updatedAt: Number(doc.updatedAt) || Date.now(),
+          filename: typeof doc.filename === 'string' ? doc.filename : null,
+          fileHash: typeof doc.fileHash === 'string' ? doc.fileHash : null,
         }
       }
       return normalized
@@ -790,6 +769,8 @@
       content: initial.content || '',
       style: initial.style ?? null,
       updatedAt: Date.now(),
+      filename: initial.filename ?? null,
+      fileHash: initial.fileHash ?? null,
     }
 
     docs[doc.id] = doc
@@ -806,47 +787,33 @@
   //
   // Lets AI agents / external tools read and write the user's notes as
   // plain .md files in a real folder on disk. The user picks a folder
-  // once (showDirectoryPicker); the handle is persisted in IndexedDB
-  // so it survives reloads. From then on:
+  // once; the handle is persisted in IndexedDB across reloads. From
+  // then on:
+  //   - save() writes the current doc to <folder>/<slug>.md
+  //   - On page load + tab refocus, syncFromFolder() pulls in any
+  //     external changes (file wins on conflict).
   //
-  //   - Every save() also writes the current doc to <folder>/<slug>.md
-  //   - On page load + tab refocus, we scan the folder for changed or
-  //     new .md files and merge them into the in-browser docs (newest
-  //     mtime wins).
+  // Per-doc sync state (filename, content hash) is stored ON the doc
+  // object itself (doc.filename, doc.fileHash) rather than in parallel
+  // maps. This keeps everything in one place and persists naturally
+  // via persistDocs().
   //
-  // Firefox/Safari don't support showDirectoryPicker, so the feature
-  // gracefully no-ops there (menu items still appear but prompt the
-  // user that their browser doesn't support it).
+  // Conflict policy: if the file's content hash differs from
+  // doc.fileHash, the file was edited externally and file wins. The
+  // one exception: if the file is empty but the doc has content, we
+  // treat that as corruption (not an intentional edit) and restore
+  // the file from the doc.
   // ---------------------------------------------------------------------------
 
-  let linkedFolderHandle = null   // FileSystemDirectoryHandle or null
+  let linkedFolderHandle = null
   const folderSyncDbName = 'notes-folder-sync'
   const folderSyncStore = 'handles'
   const folderSyncKey = 'linked-folder'
-  // Per-doc filename tracking so renames (title change) can delete the
-  // old file when the slug changes. Maps docId -> filename (with .md).
-  const docFilenames = {}  // populated from localStorage on load
-  // Per-doc hash of the file content as we last knew it. Used for
-  // change detection: if the file's current hash differs from this,
-  // the file was modified externally (by an AI agent, external editor,
-  // etc.) since we last synced. We use content hashing instead of
-  // mtime comparison because mtime is unreliable across browser clock
-  // vs filesystem clock, and because save() bumps doc.updatedAt on
-  // every unload which would mask external edits.
-  // Maps docId -> sha256 hex string (or '' if never synced).
-  const fileContentHash = {}
 
-  // Check whether folder sync is usable in the current browser AND
-  // origin. The File System Access API requires a secure context
-  // (HTTPS or http://localhost). Loading this page from file:// will
-  // fail even though showDirectoryPicker exists - the call throws
-  // a SecurityError. Returns null if supported, or a human-readable
-  // reason string if not.
+  // Check whether folder sync is usable. Returns null if yes, or a
+  // human-readable reason string if no.
   function folderSyncBlocker() {
     if (typeof window.showDirectoryPicker !== 'function') {
-      // Brave ships with the File System Access API disabled by
-      // default for privacy/fingerprinting reasons - showDirectoryPicker
-      // is missing from window entirely. Chrome and Edge have it on.
       const isBrave = navigator.brave && typeof navigator.brave.isBrave === 'function'
         || /brave/i.test(navigator.userAgent)
       if (isBrave) {
@@ -855,10 +822,8 @@
       return 'Folder sync needs Chrome, Edge, or Brave. Firefox/Safari do not support it.'
     }
     if (!window.isSecureContext) {
-      // Distinguish file:// from other insecure contexts so we can
-      // give the user a specific fix.
       if (location.protocol === 'file:') {
-        return 'Folder sync needs a secure context. Serve this page via http://localhost instead of file:// - e.g. run "python3 -m http.server" in the folder and open http://localhost:8000/notes.html'
+        return 'Folder sync needs a secure context. Serve via http://localhost instead of file:// - e.g. run "python3 -m http.server" in the folder and open http://localhost:8000/notes.html'
       }
       return 'Folder sync needs HTTPS or http://localhost. Current origin is not secure: ' + location.origin
     }
@@ -869,13 +834,12 @@
     return folderSyncBlocker() === null
   }
 
-  // IndexedDB helpers for persisting the folder handle across reloads.
+  // --- IndexedDB: persist the folder handle across reloads ----------
+
   function openFolderSyncDb() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(folderSyncDbName, 1)
-      req.onupgradeneeded = () => {
-        req.result.createObjectStore(folderSyncStore)
-      }
+      req.onupgradeneeded = () => req.result.createObjectStore(folderSyncStore)
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => reject(req.error)
     })
@@ -888,9 +852,7 @@
       tx.objectStore(folderSyncStore).put(handle, folderSyncKey)
       await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error) })
       db.close()
-    } catch (e) {
-      console.error('persistFolderHandle failed:', e)
-    }
+    } catch (e) { console.error('persistFolderHandle failed:', e) }
   }
 
   async function loadPersistedFolderHandle() {
@@ -904,9 +866,7 @@
       })
       db.close()
       return handle || null
-    } catch (e) {
-      return null
-    }
+    } catch (e) { return null }
   }
 
   async function clearPersistedFolderHandle() {
@@ -919,35 +879,9 @@
     } catch (e) { /* ignore */ }
   }
 
-  function loadDocFilenames() {
-    try {
-      const raw = localStorage.getItem('notes-doc-filenames')
-      const parsed = raw ? JSON.parse(raw) : {}
-      Object.assign(docFilenames, parsed)
-    } catch (e) { /* ignore */ }
-  }
+  // --- Helpers ------------------------------------------------------
 
-  function persistDocFilenames() {
-    try { localStorage.setItem('notes-doc-filenames', JSON.stringify(docFilenames)) }
-    catch (e) { /* ignore */ }
-  }
-
-  function loadFileContentHash() {
-    try {
-      const raw = localStorage.getItem('notes-file-content-hash')
-      const parsed = raw ? JSON.parse(raw) : {}
-      Object.assign(fileContentHash, parsed)
-    } catch (e) { /* ignore */ }
-  }
-
-  function persistFileContentHash() {
-    try { localStorage.setItem('notes-file-content-hash', JSON.stringify(fileContentHash)) }
-    catch (e) { /* ignore */ }
-  }
-
-  // Compute a sha256 hex hash of a string. Used for change detection
-  // (not security) - the goal is just a stable fingerprint of the
-  // content so we can tell if a file changed since we last saw it.
+  // SHA-256 of text. Used for change detection, not security.
   async function hashContent(text) {
     try {
       const data = new TextEncoder().encode(text || '')
@@ -955,8 +889,7 @@
       return Array.from(new Uint8Array(buf))
         .map(b => b.toString(16).padStart(2, '0')).join('')
     } catch (e) {
-      // Fallback: simple non-crypto hash. Good enough for change
-      // detection (collisions would just cause a missed sync, rare).
+      // Fallback non-crypto hash - good enough for change detection.
       let h = 0
       const s = text || ''
       for (let i = 0; i < s.length; i++) {
@@ -967,205 +900,215 @@
     }
   }
 
-  // Convert a doc title to a filesystem-safe slug.
-  // "First Alert - Process" -> "First-Alert-Process.md"
-  // Disambiguates with a short doc-id suffix when titles collide.
+  // Convert a doc title to a filesystem-safe .md filename.
+  // "First Alert - Process" -> "First-Alert-Process-abc123.md"
+  // The 6-char doc-id suffix prevents collisions between same-titled docs.
   function slugifyTitle(title, docId) {
     const base = (title || 'untitled')
       .trim()
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')  // strip filesystem-unsafe chars
-      .replace(/\s+/g, '-')                     // spaces -> dashes
-      .replace(/-+/g, '-')                       // collapse repeated dashes
-      .replace(/^-|-$/g, '')                     // trim leading/trailing dashes
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
       || 'untitled'
-    // Append first 6 chars of docId to avoid collisions between docs
-    // with the same title (e.g. multiple "Untitled" docs).
-    const idSuffix = (docId || '').slice(0, 6)
-    return base + '-' + idSuffix + '.md'
+    return base + '-' + (docId || '').slice(0, 6) + '.md'
   }
 
-  // Write a single doc to the linked folder. Called from save().
-  // No-ops if no folder is linked. Handles renames: if the doc
-  // previously had a different filename, the old file is deleted.
-  // save() is a user gesture, so we can request permission here if
-  // needed.
+  // Ensure we have readwrite permission on the folder. Must be called
+  // from within a user gesture (click, typing) so requestPermission()
+  // can prompt. Returns true if granted.
+  async function ensureFolderPermission() {
+    if (!linkedFolderHandle) return false
+    try {
+      const perm = await linkedFolderHandle.queryPermission({mode: 'readwrite'})
+      if (perm === 'granted') return true
+      const requested = await linkedFolderHandle.requestPermission({mode: 'readwrite'})
+      if (requested === 'granted') return true
+      notify('Folder permission denied. Click "Unlink folder" and re-link to retry.')
+      return false
+    } catch (e) {
+      console.error('[folder sync] ensureFolderPermission failed:', e)
+      return false
+    }
+  }
+
+  // Check permission without prompting (safe to call outside a gesture).
+  async function hasFolderPermission() {
+    if (!linkedFolderHandle) return false
+    try {
+      return await linkedFolderHandle.queryPermission({mode: 'readwrite'}) === 'granted'
+    } catch (e) { return false }
+  }
+
+  // --- Core sync: one doc <-> one file ------------------------------
+
+  // Sync a single doc to/from its file. Called from save() (within a
+  // user gesture) and from syncFromFolder(). The doc's filename and
+  // last-known content hash are stored on the doc itself.
   //
-  // CONFLICT DETECTION (hash-based, not mtime-based):
-  // Before writing, read the file's current content and hash it.
-  //   - If the file's hash matches fileContentHash[doc.id], the file
-  //     hasn't changed since we last touched it -> safe to overwrite.
-  //   - If the file's hash DIFFERS from fileContentHash[doc.id], the
-  //     file was edited externally. Compare its content to the doc's
-  //     current content:
-  //       - If they're equal, no real change (maybe just a re-save) -
-  //         update our hash and skip the write.
-  //       - If they differ, file wins: update the doc from the file,
-  //         refresh the editor, skip the write, notify the user.
-  //
-  // This is immune to clock skew between Date.now() and filesystem
-  // mtime, which broke the previous mtime-based approach.
-  async function syncDocToFile(doc) {
+  // Logic:
+  //   1. Compute the filename from the doc's title.
+  //   2. If the filename changed since last sync, delete the old file.
+  //   3. Read the current file content (if it exists - no create).
+  //   4. Hash the file content and compare to doc.fileHash:
+  //      - Match: file unchanged since we last touched it. Write the
+  //        doc to the file (in case the doc has new edits).
+  //      - Differ: file was edited externally. File wins - update the
+  //        doc from the file. EXCEPT: if the file is empty but the doc
+  //        has content, treat as corruption and write the doc to the
+  //        file instead.
+  //      - File doesn't exist: just write the doc to a new file.
+  //   5. Never write empty content (guard against corrupted state).
+  async function syncDoc(doc) {
     if (!linkedFolderHandle || !doc) return
     if (!(await ensureFolderPermission())) return
+    if (!(doc.content || '').trim()) {
+      console.log('[folder sync] skipping empty doc', doc.id)
+      return
+    }
+
+    const newFilename = slugifyTitle(doc.title || extractTitle(doc.content), doc.id)
+
+    // Handle rename: delete the old file if the slug changed.
+    if (doc.filename && doc.filename !== newFilename) {
+      try { await linkedFolderHandle.removeEntry(doc.filename) }
+      catch (e) { /* old file may not exist */ }
+      doc.fileHash = null
+    }
+
+    // Read the existing file WITHOUT creating it. If it doesn't exist,
+    // there's no conflict possible - we'll create it on write.
+    let fileText = null
     try {
-      const newFilename = slugifyTitle(doc.title || extractTitle(doc.content), doc.id)
-      const oldFilename = docFilenames[doc.id]
+      const handle = await linkedFolderHandle.getFileHandle(newFilename)
+      const file = await handle.getFile()
+      fileText = await file.text()
+    } catch (e) {
+      // File doesn't exist - that's fine.
+    }
 
-      // If the slug changed (title rename), delete the old file and
-      // reset the content hash (new file = no known state).
-      if (oldFilename && oldFilename !== newFilename) {
-        try { await linkedFolderHandle.removeEntry(oldFilename) }
-        catch (e) { /* old file may not exist - ignore */ }
-        delete fileContentHash[doc.id]
-      }
-
-      const fileHandle = await linkedFolderHandle.getFileHandle(newFilename, {create: true})
-
-      // Read the file's current content (if it exists) to detect
-      // external edits.
-      const knownHash = fileContentHash[doc.id] || ''
-      let fileText = null
-      try {
-        const existingFile = await fileHandle.getFile()
-        fileText = await existingFile.text()
-      } catch (e) {
-        // File doesn't exist yet (first sync) - no conflict possible.
-      }
-
-      if (fileText !== null) {
-        const fileHash = await hashContent(fileText)
-        if (fileHash !== knownHash) {
-          // File changed since we last knew it.
-          if (fileText !== (doc.content || '')) {
-            // Genuine conflict: file content differs from doc content.
-            // File wins - update the doc from the file and skip the write.
-            console.log(`[folder sync] external edit detected in ${newFilename}, updating doc from file`)
+    if (fileText !== null) {
+      const fileHash = await hashContent(fileText)
+      if (fileHash !== doc.fileHash) {
+        // File changed since we last knew it.
+        const docContent = doc.content || ''
+        if (fileText !== docContent) {
+          // Empty file + non-empty doc = corruption, not an edit.
+          // Restore the file from the doc.
+          if (!fileText.trim() && docContent.trim()) {
+            console.log(`[folder sync] ${newFilename} is empty but doc has content - restoring file`)
+          } else {
+            // Genuine external edit. File wins.
+            console.log(`[folder sync] external edit in ${newFilename} - updating doc from file`)
             doc.content = fileText
             doc.title = extractTitle(fileText)
             doc.updatedAt = Date.now()
+            doc.fileHash = fileHash
+            doc.filename = newFilename
             docs[doc.id] = doc
             persistDocs()
-            fileContentHash[doc.id] = fileHash
-            persistFileContentHash()
-            docFilenames[doc.id] = newFilename
-            persistDocFilenames()
-            if (doc.id === currentDocId) {
-              applyDoc(doc)
-            }
-            notify(`External edit in ${newFilename} - updated from file`)
-            return  // skip the write - file is already correct
+            if (doc.id === currentDocId) applyDoc(doc)
+            notify(`Updated from file: ${newFilename}`)
+            return
           }
-          // Content matches what we're about to write - no real
-          // change. Just update our hash to reflect the file's state.
-          fileContentHash[doc.id] = fileHash
         }
+        // Content matches - no real change. Update hash to reflect
+        // the file's current state.
+        doc.fileHash = fileHash
+      } else {
+        // File unchanged since we last touched it. Safe to overwrite
+        // with the doc's current content (which may have new edits).
       }
+    }
 
-      // No external edit detected - safe to write.
+    // Write the doc's content to the file.
+    try {
+      const fileHandle = await linkedFolderHandle.getFileHandle(newFilename, {create: true})
       const writable = await fileHandle.createWritable()
       await writable.write(doc.content || '')
       await writable.close()
-
-      // Record the hash of what we just wrote so future syncs can
-      // detect external edits.
-      fileContentHash[doc.id] = await hashContent(doc.content || '')
-      persistFileContentHash()
-      docFilenames[doc.id] = newFilename
-      persistDocFilenames()
+      doc.filename = newFilename
+      doc.fileHash = await hashContent(doc.content || '')
+      persistDocs()
     } catch (e) {
-      console.error('syncDocToFile failed for', doc.id, e)
+      console.error('[folder sync] write failed for', doc.id, e)
       notify('Folder sync failed - check console')
     }
   }
 
-  // Scan the linked folder for .md files and merge them into the
-  // in-browser docs. Strategy (hash-based, no mtime, no content dedup):
-  //   1. List all *.md files in the folder.
-  //   2. For each file, find the doc mapped to its filename
-  //      (via docFilenames). If found:
-  //        - Hash the file content.
-  //        - If hash matches fileContentHash[docId], no change.
-  //        - If hash differs, the file was edited externally ->
-  //          update the doc from the file.
-  //   3. If no doc is mapped to the filename, this is a NEW file ->
-  //      create a new doc from it.
+  // --- Folder scan: pull in external changes ------------------------
+
+  // Scan the linked folder for .md files and merge them into docs.
+  // For each file:
+  //   - If a doc has doc.filename === this file -> compare hashes,
+  //     update doc if file changed (file wins, same corruption guard).
+  //   - If no doc has this filename -> new file, create a doc from it.
+  // Files with no corresponding doc mapping are imported as new docs.
+  // Docs whose file was deleted from the folder are left alone (the
+  // user might be mid-edit, or might have deleted the file by accident).
   //
-  // NOTE: We deliberately do NOT try to match files to docs by content
-  // anymore. That was the source of the duplication bug: when a file
-  // was renamed (because the doc title changed), the old mapping was
-  // stale, and if the content had drifted even slightly the matcher
-  // would fail and create a duplicate doc. Filename mapping is the
-  // only source of truth for doc<->file identity.
-  //
-  // Called on page load, on tab refocus, and via the manual
-  // "Refresh from folder" menu item.
-  //
-  // userInitiated: true when called from a click handler or save()
-  // (i.e. within a user gesture). When true, we can call
-  // requestPermission() if needed. When false (automatic triggers
-  // like page load or visibilitychange), we only proceed if
-  // permission is already granted.
+  // userInitiated: true when called from a click (can request
+  // permission). false for automatic triggers (only proceeds if
+  // permission is already granted).
   async function syncFromFolder(userInitiated = false) {
     if (!linkedFolderHandle) return
     if (userInitiated) {
       if (!(await ensureFolderPermission())) return
     } else {
-      // Automatic trigger - check permission but don't request
-      // (no user gesture available).
-      try {
-        const perm = await linkedFolderHandle.queryPermission({mode: 'readwrite'})
-        if (perm !== 'granted') {
-          console.log('[folder sync] skipping auto-sync, permission:', perm)
-          return
-        }
-      } catch (e) { return }
+      if (!(await hasFolderPermission())) {
+        console.log('[folder sync] skipping auto-sync - no permission')
+        return
+      }
     }
-    try {
-      let newCount = 0, updatedCount = 0
 
+    let newCount = 0, updatedCount = 0
+
+    try {
       for await (const entry of linkedFolderHandle.values()) {
         if (entry.kind !== 'file' || !entry.name.endsWith('.md')) continue
         const file = await entry.getFile()
         const text = await file.text()
         const fileHash = await hashContent(text)
 
-        // Find doc by filename mapping ONLY (no content matching).
-        let docId = null
-        for (const [id, fn] of Object.entries(docFilenames)) {
-          if (fn === entry.name) { docId = id; break }
+        // Find doc by filename.
+        let doc = null
+        for (const d of Object.values(docs)) {
+          if (d.filename === entry.name) { doc = d; break }
         }
 
-        if (docId && docs[docId]) {
-          // Existing doc - check if file content changed since last sync.
-          const knownHash = fileContentHash[docId] || ''
-          if (fileHash !== knownHash) {
-            // File changed since we last knew it. Update the doc.
-            // (We don't compare to doc.content here - even if the doc
-            // has unsaved in-memory edits, the file is the source of
-            // truth on a syncFromFolder call. If the user is mid-edit
-            // they shouldn't be triggering a refresh.)
-            docs[docId].content = text
-            docs[docId].title = extractTitle(text)
-            docs[docId].updatedAt = Date.now()
-            fileContentHash[docId] = fileHash
-            updatedCount++
-            if (docId === currentDocId) {
-              applyDoc(docs[docId])
-            }
+        if (doc) {
+          if (fileHash === doc.fileHash) continue  // no change
+          // File changed. Same corruption guard as syncDoc.
+          if (!text.trim() && (doc.content || '').trim()) {
+            console.log(`[folder sync] ${entry.name} is empty but doc has content - restoring file`)
+            try {
+              const fh = await linkedFolderHandle.getFileHandle(entry.name, {create: true})
+              const w = await fh.createWritable()
+              await w.write(doc.content)
+              await w.close()
+              doc.fileHash = await hashContent(doc.content)
+            } catch (e) { console.error('[folder sync] restore failed:', e) }
+            continue
           }
+          // File wins.
+          doc.content = text
+          doc.title = extractTitle(text)
+          doc.updatedAt = Date.now()
+          doc.fileHash = fileHash
+          updatedCount++
+          if (doc.id === currentDocId) applyDoc(doc)
         } else {
-          // No doc mapped to this filename -> genuinely new file.
-          // Create a new doc and record both the filename and hash.
-          const doc = createDoc({content: text, style: null}, false)
-          docFilenames[doc.id] = entry.name
-          fileContentHash[doc.id] = fileHash
+          // New file - create a doc from it. Skip empty files (they're
+          // almost certainly not intentional notes).
+          if (!text.trim()) continue
+          doc = createDoc({content: text, style: null}, false)
+          doc.filename = entry.name
+          doc.fileHash = fileHash
           newCount++
         }
       }
 
       persistDocs()
-      persistDocFilenames()
-      persistFileContentHash()
       renderRecentDocs()
       renderDocSelector()
 
@@ -1174,13 +1117,21 @@
         notify(`Synced from folder: ${newCount} new, ${updatedCount} updated`)
       }
     } catch (e) {
-      console.error('syncFromFolder failed:', e)
+      console.error('[folder sync] scan failed:', e)
       notify('Folder refresh failed - check console')
     }
   }
 
-  // User-initiated folder link. Prompts for a directory picker, then
-  // does an initial sync (import any existing .md files).
+  // Delete the file for a doc (called from deleteDoc). No-ops if the
+  // doc has no filename or no folder is linked.
+  async function deleteDocFile(doc) {
+    if (!linkedFolderHandle || !doc || !doc.filename) return
+    try { await linkedFolderHandle.removeEntry(doc.filename) }
+    catch (e) { /* file may already be gone */ }
+  }
+
+  // --- Folder link / unlink / restore -------------------------------
+
   async function linkFolder() {
     const blocker = folderSyncBlocker()
     if (blocker) {
@@ -1194,12 +1145,10 @@
       await persistFolderHandle(handle)
       updateLinkFolderLabel()
       notify('Folder linked: ' + handle.name)
-      // Initial sync - pull in any .md files already in the folder.
-      // Pass userInitiated=true since this is within a click gesture.
       await syncFromFolder(true)
     } catch (e) {
-      if (e.name === 'AbortError') return  // user cancelled
-      console.error('linkFolder failed:', e)
+      if (e.name === 'AbortError') return
+      console.error('[folder sync] linkFolder failed:', e)
       notify('Could not link folder - see console')
     }
   }
@@ -1219,59 +1168,65 @@
       : 'Link folder…'
   }
 
-  // On page load, try to restore the persisted folder handle. The
-  // browser may prompt for permission again if the handle was revoked.
-  //
-  // IMPORTANT: requestPermission() requires a user gesture. Calling it
-  // on page load silently fails with NotAllowedError. So we restore
-  // the handle and update the label regardless of permission state,
-  // and defer the actual permission request to the first user-
-  // initiated action (save() or a "Refresh from folder" click). If
-  // permission is already granted (common case), we sync immediately.
+  // On page load, restore the persisted folder handle. Always restore
+  // the handle + label (so the UI shows linked state); only sync if
+  // permission is already granted (requestPermission needs a gesture).
   async function restoreLinkedFolder() {
     if (!supportsFolderSync()) return
     const handle = await loadPersistedFolderHandle()
     if (!handle) return
-    // Always restore the handle so the UI shows the linked state and
-    // so save() can request permission lazily on the next user gesture.
     linkedFolderHandle = handle
     updateLinkFolderLabel()
     try {
       const perm = await handle.queryPermission({mode: 'readwrite'})
       console.log('[folder sync] restored handle, permission:', perm)
       if (perm === 'granted') {
-        // Permission already held - safe to sync immediately.
-        await syncFromFolder()
+        await syncFromFolder(false)
       } else {
-        // Permission is 'prompt' or 'denied'. Don't call
-        // requestPermission() here (no user gesture -> would fail).
-        // The next save() (user is typing) or "Refresh from folder"
-        // click will request permission within a valid gesture.
-        console.log('[folder sync] permission not granted yet; will request on next user action')
+        console.log('[folder sync] will request permission on next user action')
       }
     } catch (e) {
-      console.error('restoreLinkedFolder failed:', e)
+      console.error('[folder sync] restore failed:', e)
     }
   }
 
-  // Ensure we have permission to read/write the linked folder. Call
-  // this from within a user gesture (save, click handler). Returns
-  // true if permission is granted, false otherwise.
-  async function ensureFolderPermission() {
-    if (!linkedFolderHandle) return false
+  // --- Migration: merge old parallel maps into docs -----------------
+
+  // Previous versions stored filename/hash in separate localStorage
+  // keys (notes-doc-filenames, notes-file-content-hash). Migrate those
+  // into doc.filename / doc.fileHash on the docs themselves, then
+  // delete the old keys. One-time - safe to call on every load.
+  function migrateOldSyncMaps() {
+    let oldFilenames = null, oldHashes = null
     try {
-      const perm = await linkedFolderHandle.queryPermission({mode: 'readwrite'})
-      if (perm === 'granted') return true
-      // requestPermission() is OK here because we're in a user gesture.
-      const requested = await linkedFolderHandle.requestPermission({mode: 'readwrite'})
-      if (requested === 'granted') return true
-      console.warn('[folder sync] permission request returned:', requested)
-      notify('Folder permission denied. Click "Unlink folder" and re-link to retry.')
-      return false
-    } catch (e) {
-      console.error('[folder sync] ensureFolderPermission failed:', e)
-      return false
+      const raw = localStorage.getItem('notes-doc-filenames')
+      if (raw) oldFilenames = JSON.parse(raw)
+    } catch (e) {}
+    try {
+      const raw = localStorage.getItem('notes-file-content-hash')
+      if (raw) oldHashes = JSON.parse(raw)
+    } catch (e) {}
+
+    if (!oldFilenames && !oldHashes) return  // nothing to migrate
+
+    let changed = false
+    for (const doc of Object.values(docs)) {
+      if (!doc.filename && oldFilenames && oldFilenames[doc.id]) {
+        doc.filename = oldFilenames[doc.id]
+        changed = true
+      }
+      if (doc.fileHash == null && oldHashes && oldHashes[doc.id]) {
+        doc.fileHash = oldHashes[doc.id]
+        changed = true
+      }
     }
+    if (changed) persistDocs()
+
+    // Clean up old keys.
+    try { localStorage.removeItem('notes-doc-filenames') } catch (e) {}
+    try { localStorage.removeItem('notes-file-content-hash') } catch (e) {}
+    try { localStorage.removeItem('notes-last-file-sync') } catch (e) {}
+    if (changed) console.log('[folder sync] migrated old sync maps into docs')
   }
 
   function newDocId() {
