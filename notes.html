@@ -450,8 +450,8 @@
   const article = document.querySelector('article')
   const menu = document.querySelector('#menu')
   const editor = new Editor(article, parseMarkdown)
-  const docsKey = 'notes-docs'
-  const currentDocKey = 'notes-current-doc-id'
+  const docsKey = 'textarea-docs'
+  const currentDocKey = 'textarea-current-doc-id'
   let docs = loadDocs()
   let currentDocId = localStorage.getItem(currentDocKey)
 
@@ -687,7 +687,7 @@
       .map(line => line.trim())
       .find(Boolean)
 
-    if (!firstLine) return 'Notes'
+    if (!firstLine) return 'Textarea'
 
     const cleaned = firstLine
       .replace(/^#{1,6}\s+/, '')
@@ -810,8 +810,37 @@
   // old file when the slug changes. Maps docId -> filename (with .md).
   const docFilenames = {}  // populated from localStorage on load
 
+  // Check whether folder sync is usable in the current browser AND
+  // origin. The File System Access API requires a secure context
+  // (HTTPS or http://localhost). Loading this page from file:// will
+  // fail even though showDirectoryPicker exists - the call throws
+  // a SecurityError. Returns null if supported, or a human-readable
+  // reason string if not.
+  function folderSyncBlocker() {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      // Brave ships with the File System Access API disabled by
+      // default for privacy/fingerprinting reasons - showDirectoryPicker
+      // is missing from window entirely. Chrome and Edge have it on.
+      const isBrave = navigator.brave && typeof navigator.brave.isBrave === 'function'
+        || /brave/i.test(navigator.userAgent)
+      if (isBrave) {
+        return 'Brave disables the File System Access API by default. Enable it: go to brave://flags, search "File System Access API", set to Enabled, relaunch. (Or use Chrome/Edge, or run via http://localhost.)'
+      }
+      return 'Folder sync needs Chrome, Edge, or Brave. Firefox/Safari do not support it.'
+    }
+    if (!window.isSecureContext) {
+      // Distinguish file:// from other insecure contexts so we can
+      // give the user a specific fix.
+      if (location.protocol === 'file:') {
+        return 'Folder sync needs a secure context. Serve this page via http://localhost instead of file:// - e.g. run "python3 -m http.server" in the folder and open http://localhost:8000/notes.html'
+      }
+      return 'Folder sync needs HTTPS or http://localhost. Current origin is not secure: ' + location.origin
+    }
+    return null
+  }
+
   function supportsFolderSync() {
-    return typeof window.showDirectoryPicker === 'function'
+    return folderSyncBlocker() === null
   }
 
   // IndexedDB helpers for persisting the folder handle across reloads.
@@ -897,8 +926,11 @@
   // Write a single doc to the linked folder. Called from save().
   // No-ops if no folder is linked. Handles renames: if the doc
   // previously had a different filename, the old file is deleted.
+  // save() is a user gesture, so we can request permission here if
+  // needed.
   async function syncDocToFile(doc) {
     if (!linkedFolderHandle || !doc) return
+    if (!(await ensureFolderPermission())) return
     try {
       const newFilename = slugifyTitle(doc.title || extractTitle(doc.content), doc.id)
       const oldFilename = docFilenames[doc.id]
@@ -936,8 +968,27 @@
   //
   // Called on page load, on tab refocus, and via the manual
   // "Refresh from folder" menu item.
-  async function syncFromFolder() {
+  //
+  // userInitiated: true when called from a click handler or save()
+  // (i.e. within a user gesture). When true, we can call
+  // requestPermission() if needed. When false (automatic triggers
+  // like page load or visibilitychange), we only proceed if
+  // permission is already granted.
+  async function syncFromFolder(userInitiated = false) {
     if (!linkedFolderHandle) return
+    if (userInitiated) {
+      if (!(await ensureFolderPermission())) return
+    } else {
+      // Automatic trigger - check permission but don't request
+      // (no user gesture available).
+      try {
+        const perm = await linkedFolderHandle.queryPermission({mode: 'readwrite'})
+        if (perm !== 'granted') {
+          console.log('[folder sync] skipping auto-sync, permission:', perm)
+          return
+        }
+      } catch (e) { return }
+    }
     try {
       const seenFilenames = new Set()
       let newCount = 0, updatedCount = 0
@@ -991,6 +1042,7 @@
       renderRecentDocs()
       renderDocSelector()
 
+      console.log(`[folder sync] scan complete: ${newCount} new, ${updatedCount} updated`)
       if (newCount || updatedCount) {
         notify(`Synced from folder: ${newCount} new, ${updatedCount} updated`)
       }
@@ -1003,8 +1055,10 @@
   // User-initiated folder link. Prompts for a directory picker, then
   // does an initial sync (import any existing .md files).
   async function linkFolder() {
-    if (!supportsFolderSync()) {
-      notify('Folder sync not supported in this browser. Use Chrome or Edge.')
+    const blocker = folderSyncBlocker()
+    if (blocker) {
+      notify(blocker)
+      console.warn('[folder sync]', blocker)
       return
     }
     try {
@@ -1013,8 +1067,9 @@
       await persistFolderHandle(handle)
       updateLinkFolderLabel()
       notify('Folder linked: ' + handle.name)
-      // Initial sync - pull in any .md files already in the folder
-      await syncFromFolder()
+      // Initial sync - pull in any .md files already in the folder.
+      // Pass userInitiated=true since this is within a click gesture.
+      await syncFromFolder(true)
     } catch (e) {
       if (e.name === 'AbortError') return  // user cancelled
       console.error('linkFolder failed:', e)
@@ -1039,29 +1094,56 @@
 
   // On page load, try to restore the persisted folder handle. The
   // browser may prompt for permission again if the handle was revoked.
+  //
+  // IMPORTANT: requestPermission() requires a user gesture. Calling it
+  // on page load silently fails with NotAllowedError. So we restore
+  // the handle and update the label regardless of permission state,
+  // and defer the actual permission request to the first user-
+  // initiated action (save() or a "Refresh from folder" click). If
+  // permission is already granted (common case), we sync immediately.
   async function restoreLinkedFolder() {
     if (!supportsFolderSync()) return
     const handle = await loadPersistedFolderHandle()
     if (!handle) return
-    // Verify we still have permission. If not, request it silently
-    // first; if that fails, the user will need to click "Link folder"
-    // again (browser UX, not much we can do).
+    // Always restore the handle so the UI shows the linked state and
+    // so save() can request permission lazily on the next user gesture.
+    linkedFolderHandle = handle
+    updateLinkFolderLabel()
     try {
       const perm = await handle.queryPermission({mode: 'readwrite'})
+      console.log('[folder sync] restored handle, permission:', perm)
       if (perm === 'granted') {
-        linkedFolderHandle = handle
-        updateLinkFolderLabel()
+        // Permission already held - safe to sync immediately.
         await syncFromFolder()
-        return
-      }
-      const requested = await handle.requestPermission({mode: 'readwrite'})
-      if (requested === 'granted') {
-        linkedFolderHandle = handle
-        updateLinkFolderLabel()
-        await syncFromFolder()
+      } else {
+        // Permission is 'prompt' or 'denied'. Don't call
+        // requestPermission() here (no user gesture -> would fail).
+        // The next save() (user is typing) or "Refresh from folder"
+        // click will request permission within a valid gesture.
+        console.log('[folder sync] permission not granted yet; will request on next user action')
       }
     } catch (e) {
       console.error('restoreLinkedFolder failed:', e)
+    }
+  }
+
+  // Ensure we have permission to read/write the linked folder. Call
+  // this from within a user gesture (save, click handler). Returns
+  // true if permission is granted, false otherwise.
+  async function ensureFolderPermission() {
+    if (!linkedFolderHandle) return false
+    try {
+      const perm = await linkedFolderHandle.queryPermission({mode: 'readwrite'})
+      if (perm === 'granted') return true
+      // requestPermission() is OK here because we're in a user gesture.
+      const requested = await linkedFolderHandle.requestPermission({mode: 'readwrite'})
+      if (requested === 'granted') return true
+      console.warn('[folder sync] permission request returned:', requested)
+      notify('Folder permission denied. Click "Unlink folder" and re-link to retry.')
+      return false
+    } catch (e) {
+      console.error('[folder sync] ensureFolderPermission failed:', e)
+      return false
     }
   }
 
@@ -1804,7 +1886,7 @@
       if (!linkedFolderHandle) {
         notify('No folder linked. Use "Link folder…" first.')
       } else {
-        await syncFromFolder()
+        await syncFromFolder(true)
       }
       hideMenu()
     })
