@@ -1002,13 +1002,17 @@
   //   5. Never write empty content (guard against corrupted state).
   async function syncDoc(doc) {
     if (!linkedFolderHandle || !doc) return
-    if (!(await ensureFolderPermission())) return
+    if (!(await ensureFolderPermission())) {
+      console.log('[folder sync] no permission, skipping', doc.id)
+      return
+    }
     if (!(doc.content || '').trim()) {
       console.log('[folder sync] skipping empty doc', doc.id)
       return
     }
 
     const newFilename = slugifyTitle(doc.title || extractTitle(doc.content), doc.id)
+    console.log('[folder sync] syncDoc start:', newFilename, 'contentLen:', (doc.content||'').length, 'fileHash:', doc.fileHash?.slice(0,8))
 
     // Handle rename: delete the old file if the slug changed.
     if (doc.filename && doc.filename !== newFilename) {
@@ -1030,6 +1034,7 @@
 
     if (fileText !== null) {
       const fileHash = await hashContent(fileText)
+      console.log('[folder sync] file exists, fileHash:', fileHash.slice(0,8), 'doc.fileHash:', (doc.fileHash||'').slice(0,8), 'same:', fileHash === doc.fileHash)
       if (fileHash !== doc.fileHash) {
         // File changed since we last knew it.
         const docContent = doc.content || ''
@@ -1060,10 +1065,13 @@
         // File unchanged since we last touched it. Safe to overwrite
         // with the doc's current content (which may have new edits).
       }
+    } else {
+      console.log('[folder sync] file does not exist, will create')
     }
 
     // Write the doc's content to the file.
     try {
+      console.log('[folder sync] writing to file:', newFilename, 'contentLen:', (doc.content||'').length)
       const fileHandle = await linkedFolderHandle.getFileHandle(newFilename, {create: true})
       const writable = await fileHandle.createWritable()
       await writable.write(doc.content || '')
@@ -1071,6 +1079,7 @@
       doc.filename = newFilename
       doc.fileHash = await hashContent(doc.content || '')
       persistDocs()
+      console.log('[folder sync] write complete:', newFilename)
     } catch (e) {
       console.error('[folder sync] write failed for', doc.id, e)
       notify('Folder sync failed - check console')
