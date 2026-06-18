@@ -455,21 +455,26 @@
   let docs = loadDocs()
   let currentDocId = localStorage.getItem(currentDocKey)
 
-  // Sync to folder on input. The input event is a user gesture, so
-  // requestPermission() can be called from here (but NOT from the
-  // debounced save() timer). We grab permission on the first input
-  // if needed, then the debounced save() -> syncDoc() path works
-  // because queryPermission() returns 'granted'.
+  // Grab folder permission on the first user gesture after the folder
+  // is linked. After permission is granted once, queryPermission()
+  // returns 'granted' for the rest of the session, so the debounced
+  // save() -> syncDoc() path works without needing a gesture.
   //
-  // Also grab permission on any pointerdown on the document, so that
-  // even if the user just clicks around (without typing), we get
-  // permission for auto-syncs (visibilitychange reads, etc.).
+  // We keep listening until the folder is linked AND we've made one
+  // attempt to grab permission. Without this, fast typing would call
+  // ensureFolderPermission() on every keystroke, flooding the event
+  // loop with overlapping async queryPermission() calls.
+  let _permissionGrabbed = false
   function grabPermissionOnGesture() {
-    if (!linkedFolderHandle) return
-    if (_permissionPromise) return
+    if (_permissionGrabbed) return
+    if (!linkedFolderHandle) return  // not linked yet
+    _permissionGrabbed = true
     ensureFolderPermission().then(granted => {
       if (granted) console.log('[folder sync] permission granted')
     })
+    // Remove ourselves once we've made the attempt.
+    article.removeEventListener('input', grabPermissionOnGesture)
+    document.removeEventListener('pointerdown', grabPermissionOnGesture)
   }
   article.addEventListener('input', grabPermissionOnGesture)
   document.addEventListener('pointerdown', grabPermissionOnGesture)
@@ -499,11 +504,22 @@
       save(true)
     } else if (document.visibilityState === 'visible') {
       // Tab refocused - an AI agent / external tool may have edited
-      // files in the linked folder while we were away. Pull in any
-      // changes. No-op if no folder is linked.
+      // files in the linked folder while we were away. Pull in changes.
       syncFromFolder()
     }
   })
+
+  // Periodic background sync: every 5 seconds while the page is
+  // visible, check the folder for external changes. This catches the
+  // case where the user has the browser and an external editor side
+  // by side (no visibilitychange fires). Cheap because syncFromFolder
+  // only reads files and compares hashes - no writes unless changes
+  // are found.
+  setInterval(() => {
+    if (document.visibilityState === 'visible' && linkedFolderHandle) {
+      syncFromFolder(false)
+    }
+  }, 5000)
 
   async function load() {
     docs = loadDocs()
@@ -1002,17 +1018,10 @@
   //   5. Never write empty content (guard against corrupted state).
   async function syncDoc(doc) {
     if (!linkedFolderHandle || !doc) return
-    if (!(await ensureFolderPermission())) {
-      console.log('[folder sync] no permission, skipping', doc.id)
-      return
-    }
-    if (!(doc.content || '').trim()) {
-      console.log('[folder sync] skipping empty doc', doc.id)
-      return
-    }
+    if (!(await ensureFolderPermission())) return
+    if (!(doc.content || '').trim()) return
 
     const newFilename = slugifyTitle(doc.title || extractTitle(doc.content), doc.id)
-    console.log('[folder sync] syncDoc start:', newFilename, 'contentLen:', (doc.content||'').length, 'fileHash:', doc.fileHash?.slice(0,8))
 
     // Handle rename: delete the old file if the slug changed.
     if (doc.filename && doc.filename !== newFilename) {
@@ -1034,7 +1043,6 @@
 
     if (fileText !== null) {
       const fileHash = await hashContent(fileText)
-      console.log('[folder sync] file exists, fileHash:', fileHash.slice(0,8), 'doc.fileHash:', (doc.fileHash||'').slice(0,8), 'same:', fileHash === doc.fileHash)
       if (fileHash !== doc.fileHash) {
         // File changed since we last knew it.
         const docContent = doc.content || ''
@@ -1058,20 +1066,12 @@
             return
           }
         }
-        // Content matches - no real change. Update hash to reflect
-        // the file's current state.
         doc.fileHash = fileHash
-      } else {
-        // File unchanged since we last touched it. Safe to overwrite
-        // with the doc's current content (which may have new edits).
       }
-    } else {
-      console.log('[folder sync] file does not exist, will create')
     }
 
     // Write the doc's content to the file.
     try {
-      console.log('[folder sync] writing to file:', newFilename, 'contentLen:', (doc.content||'').length)
       const fileHandle = await linkedFolderHandle.getFileHandle(newFilename, {create: true})
       const writable = await fileHandle.createWritable()
       await writable.write(doc.content || '')
@@ -1079,7 +1079,6 @@
       doc.filename = newFilename
       doc.fileHash = await hashContent(doc.content || '')
       persistDocs()
-      console.log('[folder sync] write complete:', newFilename)
     } catch (e) {
       console.error('[folder sync] write failed for', doc.id, e)
       notify('Folder sync failed - check console')
