@@ -297,31 +297,142 @@
     border-top: 1px solid rgba(127, 127, 127, 0.16);
   }
 
-  #menu .selector-label {
-    padding: 10px 14px 6px;
-    font: 12px / 1.4 system-ui;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    opacity: 0.6;
+  /* Doc browser dialog overlay */
+  #doc-dialog-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 100;
+    place-items: center;
   }
 
-  #menu .doc-selector {
-    display: block;
-    width: calc(100% - 28px);
-    margin: 0 14px 12px;
-    padding: 10px 12px;
+  #doc-dialog-overlay.visible {
+    display: grid;
+  }
+
+  #doc-dialog {
+    width: min(90vw, 420px);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--elevated);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+  }
+
+  #doc-dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    font: 600 16px / 1.3 system-ui;
+    color: var(--text);
+  }
+
+  #doc-dialog-close {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(127, 127, 127, 0.15);
+    border-radius: 50%;
+    color: var(--text);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+  }
+
+  #doc-dialog-close:hover {
+    background: rgba(127, 127, 127, 0.3);
+  }
+
+  #doc-dialog-search {
+    margin: 0 16px 8px;
+    padding: 8px 12px;
     border-radius: 8px;
     border: 1px solid rgba(127, 127, 127, 0.22);
-    background: var(--elevated);
+    background: transparent;
     color: var(--text);
     font: 15px / 1.4 system-ui;
     outline: none;
+    width: calc(100% - 32px);
   }
 
-  #menu .doc-selector:focus-visible {
+  #doc-dialog-search:focus-visible {
     outline: 2px solid var(--outline);
     outline-offset: 2px;
+  }
+
+  #doc-dialog-search::placeholder {
+    opacity: 0.4;
+  }
+
+  #doc-dialog-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+  }
+
+  #doc-dialog-list .doc-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    color: var(--text);
+    border: none;
+    background: transparent;
+    width: 100%;n    text-align: left;
+    font: 15px / 1.4 system-ui;
+  }
+
+  #doc-dialog-list .doc-item:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    #doc-dialog-list .doc-item:hover {
+      background: #353535;
+    }
+  }
+
+  #doc-dialog-list .doc-item[data-current="true"] {
+    background: rgba(0, 122, 255, 0.1);
+  }
+
+  #doc-dialog-list .doc-item-title {
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+
+  #doc-dialog-list .doc-item-meta {
+    font: 12px / 1.3 system-ui;
+    opacity: 0.5;
+  }
+
+  #doc-dialog-list .doc-item-preview {
+    font: 13px / 1.4 system-ui;
+    opacity: 0.45;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    margin-top: 1px;
+  }
+
+  #doc-dialog-empty {
+    padding: 24px 16px;
+    text-align: center;
+    opacity: 0.5;
+    font: 15px / 1.4 system-ui;
+    color: var(--text);
   }
 
   #menu .item:hover {
@@ -379,8 +490,8 @@
     }
   }
 </style>
-<article contenteditable="plaintext-only" spellcheck autofocus></article>
-<button id="button" class="noprint">
+<article contenteditable="plaintext-only" spellcheck autofocus aria-label="Note editor"></article>
+<button id="button" class="noprint" aria-label="Menu">
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
        stroke="currentColor"
        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -390,13 +501,13 @@
   </svg>
 </button>
 <div id="menu" class="noprint" role="menu">
-  <button class="item" id="new-document" type="button" role="menuitem">
+  <button class="item" id="new-document" type="button" role="menuitem" aria-label="New document">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-plus"></use>
     </svg>
     New document
   </button>
-  <button class="item" id="delete-document" type="button" role="menuitem">
+  <button class="item" id="delete-document" type="button" role="menuitem" aria-label="Delete document">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-trash"></use>
     </svg>
@@ -407,24 +518,26 @@
     <div id="recent-docs" class="recent-docs" role="none"></div>
   </div>
   <div class="selector-section">
-    <div class="selector-label">All docs</div>
-    <select id="doc-selector" class="doc-selector" aria-label="Open any saved document">
-      <option value="">Open all docs…</option>
-    </select>
+    <button class="item" id="browse-docs" type="button" role="menuitem" aria-label="Browse documents">
+      <svg aria-hidden="true" focusable="false" width="22" height="22">
+        <use xlink:href="#icon-folder"></use>
+      </svg>
+      More docs…
+    </button>
   </div>
-  <button class="item" id="copy-rendered" type="button" role="menuitem">
+  <button class="item" id="copy-rendered" type="button" role="menuitem" aria-label="Copy rendered">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-copy"></use>
     </svg>
     Copy rendered
   </button>
-  <a class="item" id="save-as-html" href="" role="menuitem">
+  <a class="item" id="save-as-html" href="" role="menuitem" aria-label="Save as HTML">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-empty"></use>
     </svg>
     Save as HTML
   </a>
-  <a class="item" id="save-as-text" href="" role="menuitem">
+  <a class="item" id="save-as-text" href="" role="menuitem" aria-label="Save as text">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-empty"></use>
     </svg>
@@ -443,7 +556,17 @@
     Refresh from folder
   </button>
 </div>
-<div id="notification" class="noprint"></div>
+<div id="doc-dialog-overlay" class="noprint">
+  <div id="doc-dialog" role="dialog" aria-label="Browse documents">
+    <div id="doc-dialog-header">
+      <span>All documents</span>
+      <button id="doc-dialog-close" type="button" aria-label="Close">✕</button>
+    </div>
+    <input id="doc-dialog-search" type="text" placeholder="Search docs…" autocomplete="off" aria-label="Search documents">
+    <div id="doc-dialog-list"></div>
+  </div>
+</div>
+<div id="notification" class="noprint" role="status" aria-live="polite"></div>
 <script>
   initUI()
 
@@ -478,7 +601,10 @@
   }
   article.addEventListener('input', grabPermissionOnGesture)
   document.addEventListener('pointerdown', grabPermissionOnGesture)
-  article.addEventListener('input', debounce(500, save))
+  // Debounced save: wrap in arrow function so debounce doesn't pass
+  // the Event object to save(), which would be treated as
+  // skipFileSync=true and skip folder sync.
+  article.addEventListener('input', debounce(500, () => save()))
   article.addEventListener('blur', save)
   article.addEventListener('click', event => {
     if (event.target.tagName === 'A') window.open(event.target.getAttribute('href'), '_blank')
@@ -509,7 +635,7 @@
     }
   })
 
-  // Periodic background sync: every 5 seconds while the page is
+  // Periodic background sync: every 2 seconds while the page is
   // visible, check the folder for external changes. This catches the
   // case where the user has the browser and an external editor side
   // by side (no visibilitychange fires). Cheap because syncFromFolder
@@ -519,7 +645,7 @@
     if (document.visibilityState === 'visible' && linkedFolderHandle) {
       syncFromFolder(false)
     }
-  }, 5000)
+  }, 2000)
 
   async function load() {
     docs = loadDocs()
@@ -571,7 +697,7 @@
     const doc = docs[currentDocId]
     doc.content = content
     doc.style = style
-    doc.title = extractTitle(content)
+    doc.title = extractTitle(content) || doc.title
     doc.updatedAt = Date.now()
     docs[currentDocId] = doc
     persistDocs()
@@ -680,26 +806,67 @@
   }
 
   function renderDocSelector() {
-    const selector = document.querySelector('#doc-selector')
-    if (!selector) return
+    // No-op — replaced by doc dialog
+  }
 
-    const current = selector.value
-    selector.replaceChildren()
+  function openDocDialog() {
+    const overlay = document.querySelector('#doc-dialog-overlay')
+    const search = document.querySelector('#doc-dialog-search')
+    overlay.classList.add('visible')
+    search.value = ''
+    renderDocDialogList()
+    setTimeout(() => search.focus(), 50)
+  }
 
-    const placeholder = document.createElement('option')
-    placeholder.value = ''
-    placeholder.textContent = 'Open all docs…'
-    selector.appendChild(placeholder)
+  function closeDocDialog() {
+    const overlay = document.querySelector('#doc-dialog-overlay')
+    overlay.classList.remove('visible')
+  }
+
+  function renderDocDialogList(filter = '') {
+    const list = document.querySelector('#doc-dialog-list')
+    const lowerFilter = filter.toLowerCase()
+    list.innerHTML = ''
+    let count = 0
 
     for (const doc of sortedDocs()) {
-      const option = document.createElement('option')
-      option.value = doc.id
-      option.textContent = `${getDocTitle(doc)} — ${formatUpdatedAt(doc.updatedAt)}`
-      if (doc.id === currentDocId) option.selected = true
-      selector.appendChild(option)
+      const title = getDocTitle(doc)
+      const preview = (doc.content || '').replace(/\n+/g, ' ').slice(0, 80)
+      if (lowerFilter && !title.toLowerCase().includes(lowerFilter) && !preview.toLowerCase().includes(lowerFilter)) continue
+
+      const time = formatUpdatedAt(doc.updatedAt)
+
+      const btn = document.createElement('button')
+      btn.className = 'doc-item'
+      btn.type = 'button'
+      btn.dataset.id = doc.id
+      if (doc.id === currentDocId) btn.dataset.current = 'true'
+
+      btn.innerHTML =
+        '<span class="doc-item-title">' + escapeHtml(title) + '</span>' +
+        '<span class="doc-item-meta">' + escapeHtml(time) + '</span>' +
+        (preview ? '<span class="doc-item-preview">' + escapeHtml(preview) + '</span>' : '')
+
+      btn.addEventListener('click', () => {
+        closeDocDialog()
+        openDoc(doc.id)
+      })
+
+      list.appendChild(btn)
+      count++
     }
 
-    selector.value = current || currentDocId || ''
+    if (count === 0) {
+      const empty = document.createElement('div')
+      empty.id = 'doc-dialog-empty'
+      empty.textContent = lowerFilter ? 'No matching documents' : 'No documents yet'
+      list.appendChild(empty)
+    }
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   }
 
   function sortedDocs() {
@@ -716,7 +883,7 @@
       .map(line => line.trim())
       .find(Boolean)
 
-    if (!firstLine) return 'Textarea'
+    if (!firstLine) return null
 
     const cleaned = firstLine
       .replace(/^#{1,6}\s+/, '')
@@ -753,7 +920,7 @@
         const content = typeof doc.content === 'string' ? doc.content : ''
         normalized[id] = {
           id: doc.id || id,
-          title: extractTitle(content),
+          title: doc.title || extractTitle(content),
           content,
           style: typeof doc.style === 'string' ? doc.style : null,
           updatedAt: Number(doc.updatedAt) || Date.now(),
@@ -798,9 +965,17 @@
   }
 
   function createDoc(initial = {}, select = true) {
+    let title = extractTitle(initial.content || '')
+    if (!title) {
+      // Generate "New Document N" where N is the next unused number.
+      let n = 1
+      const existing = new Set(Object.values(docs).map(d => d.title))
+      while (existing.has('New Document ' + n)) n++
+      title = 'New Document ' + n
+    }
     const doc = {
       id: newDocId(),
-      title: extractTitle(initial.content || ''),
+      title: title,
       content: initial.content || '',
       style: initial.style ?? null,
       updatedAt: Date.now(),
@@ -1284,7 +1459,7 @@
   }
 
   function updateTitle() {
-    document.title = extractTitle(article.textContent || '')
+    document.title = extractTitle(article.textContent || '') || (docs[currentDocId]?.title || 'Untitled')
   }
 
   function debounce(ms, fn) {
@@ -1338,11 +1513,6 @@
     a.download = document.title + '.html'
     a.click()
     URL.revokeObjectURL(url)
-  }
-
-  function escapeHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   }
 
   // CSS for the standalone HTML file produced by downloadHTML.
@@ -1831,7 +2001,7 @@
       // List markers: only '-' and numbered ("1." / "1)"). The user
       // does NOT want '+' or '*' to start a bullet, since '+' is used
       // for underline (++text++) and '*' for bold/italic.
-      {name: 'md-listitem', re: /^([ \t]{0,8})(-|\d+[.)])([ \t]*)([^\n]*)$/my},
+      {name: 'md-listitem', re: /^([ \t]{0,8})(-|\d+[.)])([ \t]*)([^\n]*)\n?/my},
       {name: 'md-codeblock', re: /```[^\n]*\n[\s\S]*?\n```/y},
       {name: 'md-codeblock', re: /~~~[^\n]*\n[\s\S]*?\n~~~/y},
       {name: 'md-h1', re: /^#[ \t]+[^\n]*$/my},
@@ -1850,7 +2020,7 @@
       {name: 'md-link', re: /\[([^\]\n]+)\]\((https?:\/\/[^\s<>()\[\]{}"'`]+)\)/y},
     ]
 
-    const specials = ['`', '~', '*', '#', '_', 'h', '+', '[']
+    const specials = ['`', '~', '*', '#', '_', 'h', '+', '[', '-']
 
     let i = 0
     while (i < input.length) {
@@ -1942,7 +2112,7 @@
     const button = document.querySelector('#button')
     const newDocument = document.querySelector('#new-document')
     const deleteDocument = document.querySelector('#delete-document')
-    const docSelector = document.querySelector('#doc-selector')
+    const browseDocs = document.querySelector('#browse-docs')
     const saveAsHTML = document.querySelector('#save-as-html')
     const saveAsText = document.querySelector('#save-as-text')
     const copyRenderedBtn = document.querySelector('#copy-rendered')
@@ -1971,6 +2141,7 @@
       let t = event.target
       if (t.closest('#menu')) return
       if (t.closest('#button')) return
+      if (t.closest('#doc-dialog-overlay')) return
       if (t.closest('.ripple')) return
       menu.classList.remove('visible')
     })
@@ -1983,9 +2154,23 @@
       event.preventDefault()
       deleteDoc()
     })
-    docSelector?.addEventListener('change', event => {
-      const id = event.target.value
-      if (id) openDoc(id)
+
+    // Doc dialog
+    browseDocs?.addEventListener('click', event => {
+      event.preventDefault()
+      hideMenu()
+      renderDocDialogList()
+      openDocDialog()
+    })
+    document.querySelector('#doc-dialog-close')?.addEventListener('click', closeDocDialog)
+    document.querySelector('#doc-dialog-overlay')?.addEventListener('click', event => {
+      if (event.target.id === 'doc-dialog-overlay') closeDocDialog()
+    })
+    document.querySelector('#doc-dialog-search')?.addEventListener('input', event => {
+      renderDocDialogList(event.target.value)
+    })
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') closeDocDialog()
     })
     saveAsHTML.addEventListener('click', event => {
       event.preventDefault()
