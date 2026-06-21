@@ -105,6 +105,8 @@
   .md-listindent {
     font-size: 0;
     line-height: 0;
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .md-listmarker {
@@ -112,6 +114,8 @@
     min-width: 1.6em;
     text-align: right;
     padding-right: 0.05em;
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .md-listitem[data-empty="true"] .md-listmarker {
@@ -121,6 +125,8 @@
   .md-listcontent {
     min-width: 0;
     white-space: pre-wrap;
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .md-bold {
@@ -469,11 +475,11 @@
     right: 17px;
     top: 17px;
 
-    background: #5ad227;
-    color: #fff;
-    border-radius: 30px;
-    font: 18px / 1 system-ui;
-    font-weight: 600;
+    background: var(--elevated);
+    color: var(--text);
+    border-radius: 10px;
+    box-shadow: 0 19px 38px rgba(0, 0, 0, 0.10), 0 15px 12px rgba(0, 0, 0, 0.05);
+    font: 16px / 1.4 system-ui;
     z-index: 2;
     padding: 10px 20px;
   }
@@ -543,13 +549,13 @@
     </svg>
     Save as TEXT
   </a>
-  <button class="item" id="link-folder" type="button" role="menuitem">
+  <button class="item" id="link-folder" type="button" role="menuitem" aria-label="Link folder">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-folder"></use>
     </svg>
     <span id="link-folder-label">Link folder…</span>
   </button>
-  <button class="item" id="refresh-folder" type="button" role="menuitem">
+  <button class="item" id="refresh-folder" type="button" role="menuitem" aria-label="Refresh from folder">
     <svg aria-hidden="true" focusable="false" width="22" height="22">
       <use xlink:href="#icon-refresh"></use>
     </svg>
@@ -1227,7 +1233,15 @@
           if (!fileText.trim() && docContent.trim()) {
             console.log(`[folder sync] ${newFilename} is empty but doc has content - restoring file`)
           } else {
-            // Genuine external edit. File wins.
+            // Genuine external edit. File wins, but not if editor has unsaved edits.
+            if (doc.id === currentDocId) {
+              const editorContent = article.textContent || ''
+              if (editorContent !== (doc.content || '')) {
+                console.log(`[folder sync] ${newFilename} changed externally but editor has unsaved edits - skipping`)
+                doc.fileHash = fileHash
+                return
+              }
+            }
             console.log(`[folder sync] external edit in ${newFilename} - updating doc from file`)
             doc.content = fileText
             doc.title = extractTitle(fileText)
@@ -1314,7 +1328,14 @@
             } catch (e) { console.error('[folder sync] restore failed:', e) }
             continue
           }
-          // File wins.
+          // File wins. But don't overwrite unsaved edits in the active doc.
+          if (doc.id === currentDocId) {
+            const editorContent = article.textContent || ''
+            if (editorContent !== (doc.content || '')) {
+              console.log(`[folder sync] ${entry.name} changed externally but editor has unsaved edits - skipping`)
+              continue
+            }
+          }
           doc.content = text
           doc.title = extractTitle(text)
           doc.updatedAt = Date.now()
@@ -1464,10 +1485,12 @@
 
   function debounce(ms, fn) {
     let timer
-    return (...args) => {
+    const d = (...args) => {
       clearTimeout(timer)
-      timer = setTimeout(() => fn(...args), ms)
+      timer = setTimeout(() => { timer = null; fn(...args) }, ms)
     }
+    d.cancel = () => { clearTimeout(timer); timer = null }
+    return d
   }
 
   async function downloadHTML() {
@@ -2031,16 +2054,25 @@
         if (res && res.index === i) {
           const raw = res[0]
           if (m.name === 'md-link') {
-            // Don't render as <a>. If we did, the URL would only live
-            // in the href attribute, and save() - which reads
-            // article.textContent - would lose the URL entirely.
-            // Instead, keep the full [text](url) markdown as plain
-            // text so it stays visible, editable, and persisted.
-            // buildSemanticHTML (used by "copy rendered") has its own
-            // parser that converts this to a proper <a> on export.
+            // Keep [text](url) visible as markdown (so save() via
+            // textContent persists it), but make the URL part clickable.
+            const linkMatch = raw.match(/^(.+?)\((https?:\/\/[^)]+)\)$/)
             const span = document.createElement('span')
             span.className = 'md-link-source'
-            span.textContent = raw
+            if (linkMatch) {
+              const [, label, url] = linkMatch
+              span.appendChild(document.createTextNode(label + '('))
+              const a = document.createElement('a')
+              a.className = 'md-url'
+              a.href = url
+              a.textContent = url
+              a.target = '_blank'
+              a.rel = 'noopener noreferrer'
+              span.appendChild(a)
+              span.appendChild(document.createTextNode(')'))
+            } else {
+              span.textContent = raw
+            }
             frag.appendChild(span)
           } else if (m.name === 'md-url') {
             const a = document.createElement('a')
@@ -2064,7 +2096,7 @@
 
             const markerSpan = document.createElement('span')
             markerSpan.className = 'md-listmarker'
-            markerSpan.textContent = /^\d+[.)]$/.test(marker) ? marker : '•'
+            markerSpan.textContent = marker
 
             const contentSpan = document.createElement('span')
             contentSpan.className = 'md-listcontent'
@@ -2072,6 +2104,14 @@
 
             item.append(indentSpan, markerSpan, contentSpan)
             frag.appendChild(item)
+            // Hidden newline for raw-text preservation (element.textContent
+            // needs \n between items so debounced re-render works).
+            // Using a zero-height span so white-space: pre-wrap doesn't
+            // render a visible line break between list items.
+            const nl = document.createElement('span')
+            nl.style.display = 'none'
+            nl.textContent = '\n'
+            frag.appendChild(nl)
           } else {
             const span = document.createElement('span')
             span.className = m.name
@@ -2523,7 +2563,10 @@
       const marker = outlookListItemMarker(p)
       const text = outlookListItemText(p)
       const indent = '  '.repeat(level)
-      return '\n' + indent + marker + ' ' + text + '\n'
+      // No leading \n — Outlook items are siblings in a flat <div>,
+      // so adding \n before each would create blank lines between
+      // items and break the list regex (which needs consecutive lines).
+      return indent + marker + ' ' + text + '\n'
     }
 
     function convertTable(tableNode, indent) {
@@ -2552,12 +2595,33 @@
     const listeners = []
     const history = []
     let at = -1, prev
+    let pendingOffset = null // character offset captured before DOM change
+    let skipNextInput = false // prevent input handler during programmatic DOM changes
 
     const debounceHighlight = debounce(30, () => {
-      const pos = save()
+      const offset = pendingOffset !== null ? pendingOffset : saveOffset()
+      pendingOffset = null
+      // Strip any native <ul>/<ol>/<li> the browser may have auto-created
+      // (some browsers ignore plaintext-only and format lists natively).
+      stripNativeLists(element)
       highlight(element)
-      restore(pos)
+      restoreOffset(offset)
     })
+
+    function stripNativeLists(el) {
+      for (const list of el.querySelectorAll('ul, ol')) {
+        const raw = []
+        const isOrdered = list.tagName === 'OL'
+        for (let i = 0; i < list.children.length; i++) {
+          const li = list.children[i]
+          const prefix = isOrdered ? `${i + 1}. ` : '- '
+          raw.push(prefix + (li.textContent || ''))
+        }
+        const tn = document.createTextNode(raw.join('\n'))
+        list.replaceWith(tn)
+      }
+      el.normalize()
+    }
 
     const shouldRecord = (event) => {
       return !isUndo(event) && !isRedo(event)
@@ -2585,11 +2649,13 @@
 
       if (event.key === 'Tab') {
         preventDefault(event)
+        pendingOffset = null // don't let pending offset interfere
         indentSelection(event.shiftKey)
         return
       }
 
       if (event.key === 'Enter') {
+        pendingOffset = null // don't let pending offset interfere
         const action = nextListAction()
         if (action?.exit) {
           preventDefault(event)
@@ -2598,7 +2664,7 @@
         }
         if (action?.prefix) {
           preventDefault(event)
-          insertText(`\n${action.prefix}`)
+          insertListPrefix(action.prefix)
           return
         }
       }
@@ -2608,6 +2674,11 @@
       if (shouldRecord(event) && !recording) {
         recordHistory()
         recording = true
+      }
+      // Capture cursor offset now, before the character is inserted.
+      // The debounce highlight will use this to restore position after re-render.
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        pendingOffset = saveOffset()
       }
     })
     on('keyup', event => {
@@ -2663,42 +2734,163 @@
     on('beforeinput', event => {
       if (event.inputType === 'historyUndo') doUndo(event)
       if (event.inputType === 'historyRedo') doRedo(event)
+      // Trigger re-render after text input. This catches cases where
+      // keyup doesn't fire (e.g. IME, paste, or automation tools)
+      // and ensures markdown is parsed after every text change.
+      if (event.inputType === 'insertText' ||
+          event.inputType === 'insertParagraph' ||
+          event.inputType === 'insertLineBreak' ||
+          event.inputType === 'insertOrderedList' ||
+          event.inputType === 'insertUnorderedList') {
+        // Prevent browser auto-formatting of lists. We handle list
+        // rendering ourselves via parseMarkdown, and the browser's
+        // auto-formatting would create <ul>/<ol> that break our span-based DOM.
+        if (event.inputType === 'insertOrderedList' ||
+            event.inputType === 'insertUnorderedList') {
+          event.preventDefault()
+          return
+        }
+        // Capture cursor offset before text is inserted, then add
+        // the length of inserted text so restore places cursor after it.
+        const insertedLen = (event.data || '').length || 1
+        pendingOffset = saveOffset() + insertedLen
+        debounceHighlight()
+      }
+    })
+    // Safety net: the input event fires after text changes, ensuring
+    // re-render even if beforeinput/keyup are missed (e.g. IME, assistive tech).
+    on('input', event => {
+      if (skipNextInput) { skipNextInput = false; return }
+      if (prev !== toString()) debounceHighlight()
     })
 
     function nextListAction() {
       const pos = save()
-      const text = toString()
-      const before = text.slice(0, pos.start)
-      const lineStart = before.lastIndexOf('\n') + 1
-      const line = before.slice(lineStart)
-      // Only '-' is treated as an unordered bullet marker (the user
-      // does not want '+' or '*' to start bullets, since '+' is used
-      // for underline (++text++) and '*' for bold/italic).
-      const unordered = line.match(/^(\s*)(-)\s+(.*)$/)
-      if (unordered) {
-        if (!unordered[3].trim()) return {exit: true}
-        return {prefix: `${unordered[1]}${unordered[2]} `}
+      // Walk the DOM to find the list item containing the cursor.
+      // This is more robust than parsing textContent, which loses
+      // newlines and transforms '-' into '•' after parseMarkdown.
+      const sel = getSelection()
+      if (!sel || !sel.rangeCount) return null
+      const anchor = sel.anchorNode
+      const listItem = (anchor.nodeType === 1)
+        ? anchor.closest('.md-listitem')
+        : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
+      if (!listItem) return null
+
+      const markerSpan = listItem.querySelector('.md-listmarker')
+      const contentSpan = listItem.querySelector('.md-listcontent')
+      const indentSpan = listItem.querySelector('.md-listindent')
+      if (!markerSpan || !contentSpan) return null
+
+      const marker = markerSpan.textContent
+      const content = contentSpan.textContent || ''
+      const indent = indentSpan ? indentSpan.textContent : ''
+
+      // Unordered list: marker is '-' or '•'
+      if (marker === '-' || marker === '•') {
+        if (!content.trim()) return {exit: true}
+        return {prefix: `${indent}- `}
       }
 
-      const ordered = line.match(/^(\s*)(\d+)([.)])\s+(.*)$/)
-      if (ordered) {
-        if (!ordered[4].trim()) return {exit: true}
-        return {prefix: `${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]} `}
+      // Ordered list: marker is '1.', '2)', etc.
+      const orderedMatch = marker.match(/^(\d+)([.)])$/)
+      if (orderedMatch) {
+        if (!content.trim()) return {exit: true}
+        const num = Number(orderedMatch[1]) + 1
+        const sep = orderedMatch[2]
+        return {prefix: `${indent}${num}${sep} `}
       }
 
       return null
     }
 
     function exitList() {
-      const pos = save()
-      const text = toString()
-      const before = text.slice(0, pos.start)
-      const lineStart = before.lastIndexOf('\n') + 1
-      const newText = text.slice(0, lineStart) + '\n' + text.slice(pos.end)
-      const caret = lineStart + 1
-      element.textContent = newText
+      skipNextInput = true
+      const sel = getSelection()
+      if (!sel || !sel.rangeCount) return
+      const anchor = sel.anchorNode
+      const listItem = (anchor.nodeType === 1)
+        ? anchor.closest('.md-listitem')
+        : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
+      if (!listItem) return
+
+      // Remove the empty list item and place cursor after the previous item.
+      // If there's no previous item, insert a text node before this item.
+      const prevItem = listItem.previousElementSibling
+      if (prevItem) {
+        listItem.remove()
+        // Place cursor at end of previous item's content
+        const prevContent = prevItem.querySelector('.md-listcontent')
+        if (prevContent && prevContent.firstChild) {
+          const newRange = document.createRange()
+          newRange.setStart(prevContent.firstChild, prevContent.firstChild.textContent.length)
+          newRange.collapse(true)
+          sel.removeAllRanges()
+          sel.addRange(newRange)
+        }
+      } else {
+        // No previous item - replace with a text node containing a newline
+        const textNode = document.createTextNode('\n')
+        element.insertBefore(textNode, listItem)
+        listItem.remove()
+
+        const newRange = document.createRange()
+        newRange.setStart(textNode, 1)
+        newRange.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(newRange)
+      }
+      // Cancel pending debounce to prevent visual cursor jump.
+      // exitList already modified the DOM; a stale debounce would
+      // re-render and briefly move the cursor.
+      debounceHighlight.cancel()
+    }
+
+    function insertListPrefix(prefix) {
+      skipNextInput = true
+      // Insert a new list item by modifying raw text (so parseMarkdown
+      // creates the item on next render) AND creating DOM elements
+      // (so the UI updates immediately).
+      const sel = getSelection()
+      if (!sel || !sel.rangeCount) return
+      const anchor = sel.anchorNode
+      const listItem = (anchor.nodeType === 1)
+        ? anchor.closest('.md-listitem')
+        : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
+      if (!listItem) return
+
+      // Build raw text: get text before listItem, add newline + prefix,
+      // then add text after listItem.
+      const range = document.createRange()
+      range.setStart(element, 0)
+      range.setEndBefore(listItem)
+      const textBefore = range.toString()
+
+      range.setStartAfter(listItem)
+      range.setEndAfter(element.lastChild)
+      const textAfter = range.toString()
+
+      const newRaw = textBefore + listItem.textContent + '\n' + prefix + textAfter
+      element.textContent = newRaw
       highlight(element)
-      restore({start: caret, end: caret, dir: '->'})
+
+      // Place cursor after the prefix in the new list item
+      const newItems = element.querySelectorAll('.md-listitem')
+      const newItem = newItems[newItems.length - 1]
+      if (newItem) {
+        const newContent = newItem.querySelector('.md-listcontent')
+        if (newContent && newContent.firstChild) {
+          const newRange = document.createRange()
+          newRange.setStart(newContent.firstChild, newContent.firstChild.textContent.length)
+          newRange.collapse(true)
+          sel.removeAllRanges()
+          sel.addRange(newRange)
+        }
+      }
+      // Cancel pending debounce to prevent visual cursor jump.
+      // insertListPrefix already called highlight(); a stale debounce
+      // would re-render the same content and briefly move the cursor.
+      debounceHighlight.cancel()
     }
 
     function insertText(text) {
@@ -2721,6 +2913,7 @@
     }
 
     function indentSelection(outdent) {
+      skipNextInput = true
       const pos = save()
       const text = toString()
       const start = Math.min(pos.start, pos.end)
@@ -2762,13 +2955,14 @@
       element.textContent = text.slice(0, blockStart) + transformed + text.slice(blockEnd)
       highlight(element)
       restore({start: mapPos(pos.start), end: mapPos(pos.end), dir: pos.dir})
+      debounceHighlight.cancel()
     }
 
     function save() {
       const s = getSelection()
       const pos = {start: 0, end: 0, dir: undefined}
       let {anchorNode, anchorOffset, focusNode, focusOffset} = s
-      if (!anchorNode || !focusNode) throw 'error1'
+      if (!anchorNode || !focusNode) return pos
       if (anchorNode === element && focusNode === element) {
         pos.start = (anchorOffset > 0 && element.textContent) ? element.textContent.length : 0
         pos.end = (focusOffset > 0 && element.textContent) ? element.textContent.length : 0
@@ -2899,6 +3093,67 @@
       }
     }
 
+    // Lightweight offset-based save/restore for debounce highlight.
+    // Unlike save()/restore() which capture DOM node references that go
+    // stale after re-render, these just use a flat character offset.
+    function saveOffset() {
+      const s = getSelection()
+      if (!s || !s.rangeCount) return 0
+      const range = document.createRange()
+      range.setStart(element, 0)
+      range.setEnd(s.anchorNode, s.anchorOffset)
+      return range.toString().length
+    }
+
+    function restoreOffset(offset) {
+      const s = getSelection()
+      if (!s) return
+      let current = 0
+      let found = false
+      const visit = (parent) => {
+        for (const child of parent.childNodes) {
+          if (child.nodeType === Node.TEXT_NODE) {
+            const len = child.textContent.length
+            if (current + len >= offset) {
+              const r = document.createRange()
+              r.setStart(child, offset - current)
+              r.collapse(true)
+              s.removeAllRanges()
+              s.addRange(r)
+              found = true
+              return 'stop'
+            }
+            current += len
+          } else if (child.nodeType === Node.ELEMENT_NODE) {
+            const result = visit(child)
+            if (result === 'stop') return 'stop'
+          }
+        }
+      }
+      visit(element)
+      // Fallback: place cursor at end of last visible text node
+      if (!found) {
+        let lastText = null
+        const findLast = (parent) => {
+          for (const child of parent.childNodes) {
+            if (child.nodeType === Node.TEXT_NODE && child.textContent.trim()) {
+              lastText = child
+            } else if (child.nodeType === Node.ELEMENT_NODE) {
+              findLast(child)
+            }
+          }
+        }
+        findLast(element)
+        if (lastText) {
+          const r = document.createRange()
+          r.setStart(lastText, lastText.textContent.length)
+          r.collapse(true)
+          s.removeAllRanges()
+          s.addRange(r)
+        }
+      }
+    }
+
     function doUndo(event) {
       preventDefault(event)
       at--
@@ -2938,6 +3193,19 @@
       if (at > maxHistory) {
         at = maxHistory
         history.splice(0, 1)
+      }
+      // Cap total history size at 10 MB to prevent memory exhaustion.
+      // Use string length as approximation (1 char ≈ 1-4 bytes UTF-8).
+      const maxBytes = 10 * 1024 * 1024
+      let totalBytes = 0
+      for (let i = 0; i < history.length; i++) {
+        totalBytes += history[i].html.length
+        if (totalBytes > maxBytes) {
+          history.splice(0, i + 1)
+          at -= i + 1
+          if (at < 0) at = 0
+          break
+        }
       }
     }
 
