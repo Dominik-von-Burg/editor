@@ -383,7 +383,29 @@ test.describe('Bullet Lists (unordered)', () => {
 });
 
 test.describe('Numbered Lists (ordered)', () => {
-  test('marker alignment: 1-digit vs 2-digit numbers', async ({ page }) => {
+  test('rapid Enter continues list (no debounce gap)', async ({ page }) => {
+    await resetPage(page);
+    // Type quickly without waiting for debounce (30ms)
+    await page.keyboard.type('1. First');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Second');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Third');
+    await page.waitForTimeout(200);
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(3);
+
+    const markers = await page.locator('.md-listmarker').allTextContents();
+    expect(markers).toContain('1. ');
+    expect(markers).toContain('2. ');
+    expect(markers).toContain('3. ');
+  });
+
+  test('marker alignment: 1-digit vs 2-digit numbers', async ({ page}) => {
     await resetPage(page);
     await page.keyboard.type('1. One');
     await page.waitForTimeout(100);

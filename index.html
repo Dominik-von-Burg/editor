@@ -2802,16 +2802,33 @@
       const listItem = (anchor.nodeType === 1)
         ? anchor.closest('.md-listitem')
         : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
-      if (!listItem) return null
 
-      const markerSpan = listItem.querySelector('.md-listmarker')
-      const contentSpan = listItem.querySelector('.md-listcontent')
-      const indentSpan = listItem.querySelector('.md-listindent')
-      if (!markerSpan || !contentSpan) return null
+      let marker, content, indent
+      if (listItem) {
+        const markerSpan = listItem.querySelector('.md-listmarker')
+        const contentSpan = listItem.querySelector('.md-listcontent')
+        const indentSpan = listItem.querySelector('.md-listindent')
+        if (!markerSpan || !contentSpan) return null
 
-      const marker = markerSpan.textContent
-      const content = contentSpan.textContent || ''
-      const indent = indentSpan ? indentSpan.textContent : ''
+        marker = markerSpan.textContent
+        content = contentSpan.textContent || ''
+        indent = indentSpan ? indentSpan.textContent : ''
+      } else {
+        // Fallback: parse raw textContent when DOM hasn't rendered yet
+        // (debounce gap). This ensures rapid Enter still continues lists.
+        const raw = element.textContent
+        const offset = saveOffset()
+        // Find the line containing the cursor
+        const before = raw.slice(0, offset)
+        const lineStart = before.lastIndexOf('\n') + 1
+        const line = raw.slice(lineStart, offset)
+
+        const m = line.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)([\s\S]*)$/)
+        if (!m) return null
+        marker = m[2] + ' '
+        content = m[4] || ''
+        indent = m[1]
+      }
 
       // Unordered list: marker is '-' or '•' (may include trailing space)
       const markerTrim = marker.trim()
@@ -2840,37 +2857,53 @@
       const listItem = (anchor.nodeType === 1)
         ? anchor.closest('.md-listitem')
         : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
-      if (!listItem) return
 
-      // Remove the empty list item and place cursor after the previous item.
-      // If there's no previous item, insert a text node before this item.
-      const prevItem = listItem.previousElementSibling
-      if (prevItem) {
-        listItem.remove()
-        // Place cursor at end of previous item's content
-        const prevContent = prevItem.querySelector('.md-listcontent')
-        if (prevContent) {
-          const newRange = document.createRange()
-          if (prevContent.firstChild) {
-            newRange.setStart(prevContent.firstChild, prevContent.firstChild.textContent.length)
-          } else {
-            newRange.setStart(prevContent, 0)
+      if (listItem) {
+        // Remove the empty list item and place cursor after the previous item.
+        // If there's no previous item, insert a text node before this item.
+        const prevItem = listItem.previousElementSibling
+        if (prevItem) {
+          listItem.remove()
+          // Place cursor at end of previous item's content
+          const prevContent = prevItem.querySelector('.md-listcontent')
+          if (prevContent) {
+            const newRange = document.createRange()
+            if (prevContent.firstChild) {
+              newRange.setStart(prevContent.firstChild, prevContent.firstChild.textContent.length)
+            } else {
+              newRange.setStart(prevContent, 0)
+            }
+            newRange.collapse(true)
+            sel.removeAllRanges()
+            sel.addRange(newRange)
           }
+        } else {
+          // No previous item - replace with a text node containing a newline
+          const textNode = document.createTextNode('\n')
+          element.insertBefore(textNode, listItem)
+          listItem.remove()
+
+          const newRange = document.createRange()
+          newRange.setStart(textNode, 1)
           newRange.collapse(true)
           sel.removeAllRanges()
           sel.addRange(newRange)
         }
       } else {
-        // No previous item - replace with a text node containing a newline
-        const textNode = document.createTextNode('\n')
-        element.insertBefore(textNode, listItem)
-        listItem.remove()
-
-        const newRange = document.createRange()
-        newRange.setStart(textNode, 1)
-        newRange.collapse(true)
-        sel.removeAllRanges()
-        sel.addRange(newRange)
+        // Fallback: raw text mode (debounce gap, DOM not rendered yet).
+        // Remove the list prefix from the current line.
+        const raw = element.textContent
+        const offset = saveOffset()
+        const before = raw.slice(0, offset)
+        const after = raw.slice(offset)
+        // Find the current line and strip its list prefix
+        const lineStart = before.lastIndexOf('\n') + 1
+        const line = before.slice(lineStart)
+        const stripped = line.replace(/^([ \t]{0,8})(-|\d+[.)])[ \t]*/, '')
+        if (stripped !== line) {
+          const newText = before.slice(0, lineStart) + stripped + after
+          element.textContent = newText
+        }
       }
       // Cancel pending debounce to prevent visual cursor jump.
       // exitList already modified the DOM; a stale debounce would
@@ -2887,39 +2920,45 @@
       const listItem = (anchor.nodeType === 1)
         ? anchor.closest('.md-listitem')
         : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
-      if (!listItem) return
 
-      const contentSpan = listItem.querySelector('.md-listcontent')
-      const markerSpan = listItem.querySelector('.md-listmarker')
-      const fullContent = contentSpan ? (contentSpan.textContent || '') : ''
-      const marker = markerSpan ? markerSpan.textContent : ''
+      let fullContent, marker, textBefore, textAfter
+      if (listItem) {
+        const contentSpan = listItem.querySelector('.md-listcontent')
+        const markerSpan = listItem.querySelector('.md-listmarker')
+        fullContent = contentSpan ? (contentSpan.textContent || '') : ''
+        marker = markerSpan ? markerSpan.textContent : ''
 
-      // Calculate cursor offset within content span.
-      let cursorOffset = fullContent.length // default: end of content
-      if (contentSpan) {
+        // Calculate cursor offset within content span.
+        let cursorOffset = fullContent.length // default: end of content
         const range = sel.getRangeAt(0)
         const preRange = document.createRange()
         preRange.selectNodeContents(contentSpan)
         preRange.setEnd(range.startContainer, range.startOffset)
         cursorOffset = preRange.toString().length
+
+        const contentBefore = fullContent.slice(0, cursorOffset)
+        const contentAfter = fullContent.slice(cursorOffset)
+
+        const r = document.createRange()
+        r.setStart(element, 0)
+        r.setEndBefore(listItem)
+        textBefore = r.toString()
+
+        r.setStartAfter(listItem)
+        r.setEndAfter(element.lastChild)
+        textAfter = r.toString()
+
+        const newRaw = textBefore + marker + contentBefore + '\n' + prefix + contentAfter + textAfter
+        element.textContent = newRaw
+      } else {
+        // Fallback: raw text mode (debounce gap, DOM not rendered yet).
+        // Insert newline + prefix at cursor position.
+        const raw = element.textContent
+        const offset = saveOffset()
+        const before = raw.slice(0, offset)
+        const after = raw.slice(offset)
+        element.textContent = before + '\n' + prefix + after
       }
-
-      // Build raw text: text before listItem, then split the content
-      // at cursor position — first part stays, second part goes to new item.
-      const contentBefore = fullContent.slice(0, cursorOffset)
-      const contentAfter = fullContent.slice(cursorOffset)
-
-      const r = document.createRange()
-      r.setStart(element, 0)
-      r.setEndBefore(listItem)
-      const textBefore = r.toString()
-
-      r.setStartAfter(listItem)
-      r.setEndAfter(element.lastChild)
-      const textAfter = r.toString()
-
-      const newRaw = textBefore + marker + contentBefore + '\n' + prefix + contentAfter + textAfter
-      element.textContent = newRaw
       highlight(element)
 
       // Place cursor after the prefix in the new list item.
