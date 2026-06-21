@@ -1176,6 +1176,101 @@ test.describe('Shift+Enter Blank Line', () => {
   });
 });
 
+test.describe('Bullet Marker Alignment', () => {
+  test('unordered list markers align vertically', async ({ page }) => {
+    await resetPage(page);
+
+    // Create 3 list items
+    await page.keyboard.type('- First item');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Second item');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Third item');
+    await page.waitForTimeout(200);
+
+    // Check all markers have same left position
+    const positions = await page.evaluate(() => {
+      const markers = document.querySelectorAll('.md-listmarker');
+      return Array.from(markers).map(m => {
+        const rect = m.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, text: m.textContent };
+      });
+    });
+
+    expect(positions.length).toBe(3);
+    // All markers should have the same left position (within 1px tolerance)
+    const firstLeft = positions[0].left;
+    for (let i = 1; i < positions.length; i++) {
+      expect(positions[i].left).toBeCloseTo(firstLeft, 0);
+    }
+  });
+
+  test('ordered list markers align vertically', async ({ page }) => {
+    await resetPage(page);
+
+    // Create 3 list items
+    await page.keyboard.type('1. First item');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Second item');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Third item');
+    await page.waitForTimeout(200);
+
+    // Check all markers have same left position
+    const positions = await page.evaluate(() => {
+      const markers = document.querySelectorAll('.md-listmarker');
+      return Array.from(markers).map(m => {
+        const rect = m.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, text: m.textContent };
+      });
+    });
+
+    expect(positions.length).toBe(3);
+    const firstLeft = positions[0].left;
+    for (let i = 1; i < positions.length; i++) {
+      expect(positions[i].left).toBeCloseTo(firstLeft, 0);
+    }
+  });
+
+  test('content aligns vertically in unordered list', async ({ page }) => {
+    await resetPage(page);
+
+    await page.keyboard.type('- First item');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Second item');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Third item');
+    await page.waitForTimeout(200);
+
+    // Check all content spans have same left position
+    const positions = await page.evaluate(() => {
+      const contents = document.querySelectorAll('.md-listcontent');
+      return Array.from(contents).map(c => {
+        const rect = c.getBoundingClientRect();
+        return { left: rect.left, text: c.textContent };
+      });
+    });
+
+    expect(positions.length).toBe(3);
+    const firstLeft = positions[0].left;
+    for (let i = 1; i < positions.length; i++) {
+      expect(positions[i].left).toBeCloseTo(firstLeft, 0);
+    }
+  });
+});
+
 test.describe('Multiple Lists', () => {
   test('two separate unordered lists with content between', async ({ page }) => {
     await resetPage(page);
