@@ -2878,9 +2878,6 @@
 
     function insertListPrefix(prefix) {
       skipNextInput = true
-      // Insert a new list item by modifying raw text (so parseMarkdown
-      // creates the item on next render) AND creating DOM elements
-      // (so the UI updates immediately).
       const sel = getSelection()
       if (!sel || !sel.rangeCount) return
       const anchor = sel.anchorNode
@@ -2889,22 +2886,40 @@
         : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
       if (!listItem) return
 
-      // Build raw text: get text before listItem, add newline + prefix,
-      // then add text after listItem.
-      const range = document.createRange()
-      range.setStart(element, 0)
-      range.setEndBefore(listItem)
-      const textBefore = range.toString()
+      const contentSpan = listItem.querySelector('.md-listcontent')
+      const markerSpan = listItem.querySelector('.md-listmarker')
+      const fullContent = contentSpan ? (contentSpan.textContent || '') : ''
+      const marker = markerSpan ? markerSpan.textContent : ''
 
-      range.setStartAfter(listItem)
-      range.setEndAfter(element.lastChild)
-      const textAfter = range.toString()
+      // Calculate cursor offset within content span.
+      let cursorOffset = fullContent.length // default: end of content
+      if (contentSpan) {
+        const range = sel.getRangeAt(0)
+        const preRange = document.createRange()
+        preRange.selectNodeContents(contentSpan)
+        preRange.setEnd(range.startContainer, range.startOffset)
+        cursorOffset = preRange.toString().length
+      }
 
-      const newRaw = textBefore + listItem.textContent + '\n' + prefix + textAfter
+      // Build raw text: text before listItem, then split the content
+      // at cursor position — first part stays, second part goes to new item.
+      const contentBefore = fullContent.slice(0, cursorOffset)
+      const contentAfter = fullContent.slice(cursorOffset)
+
+      const r = document.createRange()
+      r.setStart(element, 0)
+      r.setEndBefore(listItem)
+      const textBefore = r.toString()
+
+      r.setStartAfter(listItem)
+      r.setEndAfter(element.lastChild)
+      const textAfter = r.toString()
+
+      const newRaw = textBefore + marker + contentBefore + '\n' + prefix + contentAfter + textAfter
       element.textContent = newRaw
       highlight(element)
 
-      // Place cursor after the prefix in the new list item
+      // Place cursor after the prefix in the new list item.
       const newItems = element.querySelectorAll('.md-listitem')
       const newItem = newItems[newItems.length - 1]
       if (newItem) {
@@ -2921,9 +2936,6 @@
           sel.addRange(newRange)
         }
       }
-      // Cancel pending debounce to prevent visual cursor jump.
-      // insertListPrefix already called highlight(); a stale debounce
-      // would re-render the same content and briefly move the cursor.
       debounceHighlight.cancel()
     }
 

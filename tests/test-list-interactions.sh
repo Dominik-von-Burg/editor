@@ -404,9 +404,67 @@ test_raw_textcontent_format() {
   [[ "$dash_count" -ge 1 ]] && pass "Raw textContent has '-' markers" || fail "No '-' in textContent" "got: ${content:0:60}"
 }
 
-# ============================================================
-# RUN
-# ============================================================
+test_split_list_item() {
+  reset_state
+
+  # Type a list item
+  timeout 5 agent-browser keyboard type "- Hello World" >/dev/null 2>&1
+  sleep 0.3
+
+  # Move cursor to middle of "Hello World" (after "Hello ")
+  timeout 5 agent-browser eval --stdin >/dev/null 2>&1 <<'EOF'
+(function(){
+  const s = window.getSelection();
+  const range = document.createRange();
+  const content = document.querySelector(".md-listcontent");
+  range.setStart(content.firstChild, 6);
+  range.collapse(true);
+  s.removeAllRanges();
+  s.addRange(range);
+})()
+EOF
+
+  # Press Enter to split
+  agent-browser press Enter >/dev/null 2>&1
+  sleep 0.3
+
+  # Should have 2 items: "Hello " and "World"
+  local items
+  items=$(timeout 5 agent-browser eval 'document.querySelectorAll(".md-listitem").length')
+  [[ "$items" -eq 2 ]] && pass "Split created 2 items" || fail "Split items count" "got=$items"
+
+  local contents
+  contents=$(timeout 5 agent-browser eval 'Array.from(document.querySelectorAll(".md-listcontent")).map(c => c.textContent).join("|")' | tr -d '"')
+  [[ "$contents" == "Hello |World" ]] && pass "Split at cursor: 'Hello |World'" || fail "Split content" "got=$contents"
+
+  # Test ordered list split
+  reset_state
+  timeout 5 agent-browser keyboard type "1. Alpha Beta" >/dev/null 2>&1
+  sleep 0.3
+
+  timeout 5 agent-browser eval --stdin >/dev/null 2>&1 <<'EOF'
+(function(){
+  const s = window.getSelection();
+  const range = document.createRange();
+  const content = document.querySelector(".md-listcontent");
+  range.setStart(content.firstChild, 6);
+  range.collapse(true);
+  s.removeAllRanges();
+  s.addRange(range);
+})()
+EOF
+
+  agent-browser press Enter >/dev/null 2>&1
+  sleep 0.3
+
+  local oitems
+  oitems=$(timeout 5 agent-browser eval 'document.querySelectorAll(".md-listitem").length')
+  [[ "$oitems" -eq 2 ]] && pass "Ordered split: 2 items" || fail "Ordered split count" "got=$oitems"
+
+  local omarkers
+  omarkers=$(timeout 5 agent-browser eval 'Array.from(document.querySelectorAll(".md-listmarker")).map(m => m.textContent.trim()).join("|")' | tr -d '"')
+  [[ "$omarkers" == "1.|2." ]] && pass "Ordered split increments: 1.|2." || fail "Ordered split markers" "got=$omarkers"
+}
 main() {
   local filter="${1:-}"
 
@@ -435,6 +493,7 @@ main() {
     cursor_after_enter
     multi_item_content
     raw_textcontent_format
+    split_list_item
   )
 
   for name in "${TEST_NAMES[@]}"; do
