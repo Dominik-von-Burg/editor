@@ -12,7 +12,7 @@ set -euo pipefail
 export AGENT_BROWSER_ARGS="--no-sandbox"
 
 SERVER_PORT="${TEST_PORT:-8900}"
-BASE_URL="http://localhost:$SERVER_PORT/notes.html"
+BASE_URL="http://localhost:$SERVER_PORT/index.html"
 
 PASSED=0
 FAILED=0
@@ -415,7 +415,7 @@ main() {
   echo -e "${CYAN}========================================${NC}"
 
   # Check server
-  if ! curl -s -o /dev/null "http://localhost:$SERVER_PORT/notes.html" 2>/dev/null; then
+  if ! curl -s -o /dev/null "http://localhost:$SERVER_PORT/index.html" 2>/dev/null; then
     echo -e "${RED}Server not running on port $SERVER_PORT${NC}"
     exit 1
   fi

@@ -2096,11 +2096,11 @@
 
             const markerSpan = document.createElement('span')
             markerSpan.className = 'md-listmarker'
-            markerSpan.textContent = marker
+            markerSpan.textContent = marker + spacing
 
             const contentSpan = document.createElement('span')
             contentSpan.className = 'md-listcontent'
-            contentSpan.textContent = spacing + content
+            contentSpan.textContent = content
 
             item.append(indentSpan, markerSpan, contentSpan)
             frag.appendChild(item)
@@ -2656,6 +2656,31 @@
 
       if (event.key === 'Enter') {
         pendingOffset = null // don't let pending offset interfere
+
+        // Shift+Enter: insert a blank line (break out of list if inside one)
+        if (event.shiftKey) {
+          const sel = getSelection()
+          const anchor = sel?.anchorNode
+          const listItem = (anchor?.nodeType === 1)
+            ? anchor.closest('.md-listitem')
+            : (anchor?.parentElement && anchor.parentElement.closest('.md-listitem'))
+          if (listItem) {
+            preventDefault(event)
+            // Insert a newline before the list item
+            const nl = document.createTextNode('\n')
+            listItem.parentNode.insertBefore(nl, listItem)
+            // Move cursor to the new newline
+            const range = document.createRange()
+            range.setStart(nl, 1)
+            range.collapse(true)
+            sel.removeAllRanges()
+            sel.addRange(range)
+            debounceHighlight()
+            return
+          }
+          return // let browser handle Shift+Enter outside lists
+        }
+
         const action = nextListAction()
         if (action?.exit) {
           preventDefault(event)
@@ -2786,14 +2811,15 @@
       const content = contentSpan.textContent || ''
       const indent = indentSpan ? indentSpan.textContent : ''
 
-      // Unordered list: marker is '-' or '•'
-      if (marker === '-' || marker === '•') {
+      // Unordered list: marker is '-' or '•' (may include trailing space)
+      const markerTrim = marker.trim()
+      if (markerTrim === '-' || markerTrim === '•') {
         if (!content.trim()) return {exit: true}
         return {prefix: `${indent}- `}
       }
 
-      // Ordered list: marker is '1.', '2)', etc.
-      const orderedMatch = marker.match(/^(\d+)([.)])$/)
+      // Ordered list: marker is '1.', '2)', etc. (may include trailing space)
+      const orderedMatch = markerTrim.match(/^(\d+)([.)])$/)
       if (orderedMatch) {
         if (!content.trim()) return {exit: true}
         const num = Number(orderedMatch[1]) + 1
@@ -2821,9 +2847,13 @@
         listItem.remove()
         // Place cursor at end of previous item's content
         const prevContent = prevItem.querySelector('.md-listcontent')
-        if (prevContent && prevContent.firstChild) {
+        if (prevContent) {
           const newRange = document.createRange()
-          newRange.setStart(prevContent.firstChild, prevContent.firstChild.textContent.length)
+          if (prevContent.firstChild) {
+            newRange.setStart(prevContent.firstChild, prevContent.firstChild.textContent.length)
+          } else {
+            newRange.setStart(prevContent, 0)
+          }
           newRange.collapse(true)
           sel.removeAllRanges()
           sel.addRange(newRange)
@@ -2879,9 +2909,13 @@
       const newItem = newItems[newItems.length - 1]
       if (newItem) {
         const newContent = newItem.querySelector('.md-listcontent')
-        if (newContent && newContent.firstChild) {
+        if (newContent) {
           const newRange = document.createRange()
-          newRange.setStart(newContent.firstChild, newContent.firstChild.textContent.length)
+          if (newContent.firstChild) {
+            newRange.setStart(newContent.firstChild, newContent.firstChild.textContent.length)
+          } else {
+            newRange.setStart(newContent, 0)
+          }
           newRange.collapse(true)
           sel.removeAllRanges()
           sel.addRange(newRange)

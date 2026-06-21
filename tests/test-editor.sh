@@ -9,7 +9,7 @@ set -euo pipefail
 export AGENT_BROWSER_ARGS="--no-sandbox"
 
 SERVER_PORT="${TEST_PORT:-8900}"
-BASE_URL="http://localhost:$SERVER_PORT/notes.html"
+BASE_URL="http://localhost:$SERVER_PORT/index.html"
 
 PASSED=0
 FAILED=0
@@ -361,7 +361,7 @@ EOF
   # Verify the third item has marker "3."
   local third_marker
   third_marker=$(timeout 5 agent-browser eval 'var items = document.querySelectorAll("article .md-listitem"); items.length >= 3 ? items[2].querySelector(".md-listmarker").textContent : ""' | tr -d '"')
-  [[ "$third_marker" == "3." ]] && pass "Ordered list increments to 3." || fail "Expected marker 3." "got=$third_marker"
+  [[ "$third_marker" == "3. " || "$third_marker" == "3." ]] && pass "Ordered list increments to 3." || fail "Expected marker 3." "got=$third_marker"
 }
 
 test_recent_docs() {
@@ -1118,6 +1118,74 @@ EOF
   [[ "$s_items" -eq 3 ]] && pass "Standard <ul>: 3 items" || fail "Standard ul items" "got $s_items"
 }
 
+test_list_no_extra_space() {
+  # After Enter to continue a list, the new item should NOT have an extra
+  # leading space. Typing the first character should be at column 0 of content.
+  reset_state
+
+  timeout 5 agent-browser eval --stdin >/dev/null 2>&1 <<'EOF'
+(function(){
+  const el = document.querySelector("article");
+  el.textContent = "- Apple\n";
+  parseMarkdown(el);
+  // Simulate Enter: insertListPrefix("- ")
+  const listItem = el.querySelector('.md-listitem');
+  const range = document.createRange();
+  range.setStart(el, 0);
+  range.setEndBefore(listItem);
+  const textBefore = range.toString();
+  range.setStartAfter(listItem);
+  range.setEndAfter(el.lastChild);
+  const textAfter = range.toString();
+  const newRaw = textBefore + listItem.textContent + '\n' + '- ' + textAfter;
+  el.textContent = newRaw;
+  parseMarkdown(el);
+})()
+EOF
+  wait_fn "document.querySelectorAll('.md-listitem').length >= 2"
+
+  # Check second item content is empty (no extra space)
+  local content2
+  content2=$(timeout 5 agent-browser eval 'document.querySelectorAll(".md-listcontent")[1].textContent' | tr -d '"')
+  [[ -z "$content2" ]] && pass "New list item content is empty (no extra space)" || fail "Extra space" "content2=|${content2}|"
+
+  # Check marker includes the space (not content)
+  local marker2
+  marker2=$(timeout 5 agent-browser eval 'document.querySelectorAll(".md-listmarker")[1].textContent' | tr -d '"')
+  [[ "$marker2" == "- " ]] && pass "Marker includes spacing: '- '" || fail "Marker spacing" "marker2=|${marker2}|"
+}
+
+test_shift_enter_blank_line() {
+  # Shift+Enter inside a list item inserts a blank line before the list.
+  reset_state
+
+  timeout 5 agent-browser eval --stdin >/dev/null 2>&1 <<'EOF'
+(function(){
+  const el = document.querySelector("article");
+  el.textContent = "- Apple\n";
+  parseMarkdown(el);
+})()
+EOF
+  wait_fn "document.querySelectorAll('.md-listitem').length >= 1"
+
+  # Dispatch Shift+Enter
+  timeout 5 agent-browser eval --stdin >/dev/null 2>&1 <<'EOF'
+(function(){
+  const el = document.querySelector("article");
+  const event = new KeyboardEvent("keydown", {
+    key: "Enter", code: "Enter", shiftKey: true, bubbles: true, cancelable: true
+  });
+  el.dispatchEvent(event);
+})()
+EOF
+  sleep 0.3
+
+  # Check: blank line before the list (starts with newline)
+  local starts_with_nl
+  starts_with_nl=$(timeout 5 agent-browser eval 'document.querySelector("article").textContent.charCodeAt(0) === 10')
+  [[ "$starts_with_nl" == "true" ]] && pass "Shift+Enter: blank line before list" || fail "Shift+Enter blank line" "starts_with_nl=$starts_with_nl"
+}
+
 # ============================================================
 # RUN
 # ============================================================
@@ -1129,7 +1197,7 @@ main() {
   echo -e "${CYAN}========================================${NC}"
 
   # Check server
-  if ! curl -s -o /dev/null "http://localhost:$SERVER_PORT/notes.html" 2>/dev/null; then
+  if ! curl -s -o /dev/null "http://localhost:$SERVER_PORT/index.html" 2>/dev/null; then
     echo -e "${RED}Server not running on port $SERVER_PORT${NC}"
     exit 1
   fi
@@ -1163,6 +1231,8 @@ main() {
     edge_cases
     clickable_link_url
     outlook_paste
+    list_no_extra_space
+    shift_enter_blank_line
   )
 
   for name in "${TEST_NAMES[@]}"; do
