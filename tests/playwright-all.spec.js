@@ -15,8 +15,19 @@ async function resetPage(page) {
 async function getCursor(page) {
   return page.evaluate(() => {
     const sel = window.getSelection();
+    // Walk up to find the nearest element with a class (handles text nodes)
+    let node = sel.anchorNode;
+    let parentEl = null;
+    while (node) {
+      if (node.nodeType === 1) { // ELEMENT_NODE
+        parentEl = node;
+        break;
+      }
+      node = node.parentElement;
+    }
     return {
-      parentClass: sel.anchorNode?.parentElement?.className,
+      parentClass: parentEl?.className || '',
+      parentTag: parentEl?.tagName || '',
       offset: sel.anchorOffset,
       text: sel.anchorNode?.textContent,
     };
@@ -171,6 +182,10 @@ test.describe('Bullet Lists (unordered)', () => {
 
     const items = page.locator('.md-listitem');
     await expect(items).toHaveCount(2);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
   });
 
   test('double Enter exits list', async ({ page }) => {
@@ -184,6 +199,10 @@ test.describe('Bullet Lists (unordered)', () => {
 
     const items = page.locator('.md-listitem');
     await expect(items).toHaveCount(1);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('');
+    expect(cursor.offset).toBeGreaterThanOrEqual(0);
   });
 
   test('Tab indents sub-bullet', async ({ page }) => {
@@ -193,10 +212,15 @@ test.describe('Bullet Lists (unordered)', () => {
     await page.keyboard.press('Enter');
     await page.waitForTimeout(100);
     await page.keyboard.press('Tab');
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(200);
 
     const content = await page.locator('article').textContent();
     expect(content).toContain('  -');
+
+    const cursor = await getCursor(page);
+    // After Tab indent, cursor is in a span (may be in list content or adjacent text)
+    expect(cursor.parentTag).toBe('SPAN');
+    expect(cursor.offset).toBeGreaterThanOrEqual(0);
   });
 
   test('Shift-Tab outdents', async ({ page }) => {
@@ -216,6 +240,10 @@ test.describe('Bullet Lists (unordered)', () => {
     // Should be back to top level
     const lines = content.split('\n').filter(l => l.trim());
     expect(lines[0]).not.toMatch(/^  -/);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentTag).toBe('SPAN');
+    expect(cursor.offset).toBeGreaterThanOrEqual(0);
   });
 
   test('split list item mid-content', async ({ page }) => {
@@ -286,10 +314,18 @@ test.describe('Bullet Lists (unordered)', () => {
     await page.waitForTimeout(50);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(50);
+    const cursor1 = await getCursor(page);
+    expect(cursor1.parentClass).toBe('md-listcontent');
+    expect(cursor1.offset).toBe(0);
+
     await page.keyboard.type('Banana');
     await page.waitForTimeout(50);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(50);
+    const cursor2 = await getCursor(page);
+    expect(cursor2.parentClass).toBe('md-listcontent');
+    expect(cursor2.offset).toBe(0);
+
     await page.keyboard.type('Cherry');
     await page.waitForTimeout(100);
 
@@ -309,6 +345,10 @@ test.describe('Bullet Lists (unordered)', () => {
 
     const content = await page.locator('article').textContent();
     expect(content).toMatch(/^- /);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(4);
   });
 
   test('no extra leading space in content', async ({ page }) => {
@@ -318,6 +358,10 @@ test.describe('Bullet Lists (unordered)', () => {
 
     const contentText = await page.locator('.md-listcontent').textContent();
     expect(contentText).toBe('Apple');
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(5);
   });
 
   test('Shift+Enter inserts blank line before list', async ({ page }) => {
@@ -332,6 +376,9 @@ test.describe('Bullet Lists (unordered)', () => {
 
     const content = await page.locator('article').textContent();
     expect(content.charCodeAt(0)).toBe(10);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('');
   });
 });
 
@@ -346,6 +393,10 @@ test.describe('Numbered Lists (ordered)', () => {
 
     const markers = await page.locator('.md-listmarker').allTextContents();
     expect(markers[0]).toContain('1.');
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(5);
   });
 
   test('Enter increments numbers', async ({ page }) => {
@@ -354,10 +405,18 @@ test.describe('Numbered Lists (ordered)', () => {
     await page.waitForTimeout(100);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(100);
+    const cursor1 = await getCursor(page);
+    expect(cursor1.parentClass).toBe('md-listcontent');
+    expect(cursor1.offset).toBe(0);
+
     await page.keyboard.type('Beta');
     await page.waitForTimeout(50);
     await page.keyboard.press('Enter');
     await page.waitForTimeout(100);
+    const cursor2 = await getCursor(page);
+    expect(cursor2.parentClass).toBe('md-listcontent');
+    expect(cursor2.offset).toBe(0);
+
     await page.keyboard.type('Gamma');
     await page.waitForTimeout(100);
 
@@ -425,6 +484,9 @@ test.describe('Numbered Lists (ordered)', () => {
 
     const items = page.locator('.md-listitem');
     await expect(items).toHaveCount(1);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('');
   });
 
   test('Tab indent', async ({ page }) => {
@@ -440,6 +502,10 @@ test.describe('Numbered Lists (ordered)', () => {
 
     const content = await page.locator('article').textContent();
     expect(content.startsWith('1. First\n  2. Second')).toBe(true);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentTag).toBe('SPAN');
+    expect(cursor.offset).toBeGreaterThanOrEqual(0);
   });
 
   test('Shift-Tab outdent', async ({ page }) => {
@@ -459,6 +525,10 @@ test.describe('Numbered Lists (ordered)', () => {
 
     const content = await page.locator('article').textContent();
     expect(content.startsWith('1. First\n2. Second')).toBe(true);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentTag).toBe('SPAN');
+    expect(cursor.offset).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -471,11 +541,18 @@ test.describe('Undo/Redo', () => {
     const before = await page.locator('article').textContent();
     expect(before).toContain('Hello');
 
+    const cursorBefore = await getCursor(page);
+    expect(cursorBefore.parentClass).toBe('');
+    expect(cursorBefore.offset).toBe(5);
+
     await page.keyboard.press('Control+z');
     await page.waitForTimeout(200);
 
     const after = await page.locator('article').textContent();
     expect(after).not.toBe(before);
+
+    const cursorAfter = await getCursor(page);
+    expect(cursorAfter.offset).toBeLessThan(cursorBefore.offset);
   });
 
   test('Ctrl+Shift+Z redo restores', async ({ page }) => {
@@ -484,6 +561,7 @@ test.describe('Undo/Redo', () => {
     await page.waitForTimeout(300);
 
     const before = await page.locator('article').textContent();
+    const cursorBefore = await getCursor(page);
 
     await page.keyboard.press('Control+z');
     await page.waitForTimeout(200);
@@ -493,6 +571,9 @@ test.describe('Undo/Redo', () => {
 
     const after = await page.locator('article').textContent();
     expect(after).toBe(before);
+
+    const cursorAfter = await getCursor(page);
+    expect(cursorAfter.offset).toBe(cursorBefore.offset);
   });
 });
 
@@ -949,6 +1030,10 @@ test.describe('List No Extra Space', () => {
     // Check second item content span is empty (no extra space)
     const content2 = await page.locator('.md-listcontent').nth(1).textContent();
     expect(content2).toBe('');
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
   });
 });
 
@@ -963,5 +1048,8 @@ test.describe('Shift+Enter Blank Line', () => {
 
     const content = await page.locator('article').textContent();
     expect(content.charCodeAt(0)).toBe(10); // starts with newline
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('');
   });
 });
