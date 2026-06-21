@@ -383,6 +383,86 @@ test.describe('Bullet Lists (unordered)', () => {
 });
 
 test.describe('Numbered Lists (ordered)', () => {
+  test('marker alignment: 1-digit vs 2-digit numbers', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('1. One');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Two');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Three');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Four');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Five');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Six');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Seven');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Eight');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Nine');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Ten');
+    await page.waitForTimeout(200);
+
+    // Check that all content spans start at the same left position
+    const positions = await page.evaluate(() => {
+      const contents = document.querySelectorAll('.md-listcontent');
+      return Array.from(contents).map(el => el.getBoundingClientRect().left);
+    });
+
+    // All content should start at the same horizontal position
+    const first = positions[0];
+    for (let i = 1; i < positions.length; i++) {
+      expect(positions[i]).toBeCloseTo(first, 0);
+    }
+
+    // Check markers are right-aligned
+    const markers = await page.locator('.md-listmarker').allTextContents();
+    expect(markers).toContain('1. ');
+    expect(markers).toContain('10. ');
+  });
+
+  test('marker alignment: 99 to 100', async ({ page }) => {
+    await resetPage(page);
+    // Inject a list with 99 and 100 to test alignment
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '99. Ninety-nine\n100. One hundred\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(200);
+
+    // Check that content spans start at roughly the same position
+    const positions = await page.evaluate(() => {
+      const contents = document.querySelectorAll('.md-listcontent');
+      return Array.from(contents).map(el => el.getBoundingClientRect().left);
+    });
+
+    expect(positions).toHaveLength(2);
+    // They should be close (within 5px due to font rendering)
+    expect(Math.abs(positions[0] - positions[1])).toBeLessThan(5);
+  });
+
   test('typing 1. creates list', async ({ page }) => {
     await resetPage(page);
     await page.keyboard.type('1. First');
