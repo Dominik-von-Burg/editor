@@ -2597,6 +2597,7 @@
     let at = -1, prev
     let pendingOffset = null // character offset captured before DOM change
     let skipNextInput = false // prevent input handler during programmatic DOM changes
+    let skipNextKeyup = false // prevent keyup handler after list actions
 
     const debounceHighlight = debounce(30, () => {
       const offset = pendingOffset !== null ? pendingOffset : saveOffset()
@@ -2709,6 +2710,7 @@
     on('keyup', event => {
       if (event.defaultPrevented) return
       if (event.isComposing) return
+      if (skipNextKeyup) { skipNextKeyup = false; return }
       if (prev !== toString()) debounceHighlight()
       debounceRecordHistory(event)
     })
@@ -2874,6 +2876,7 @@
       // exitList already modified the DOM; a stale debounce would
       // re-render and briefly move the cursor.
       debounceHighlight.cancel()
+      skipNextKeyup = true
     }
 
     function insertListPrefix(prefix) {
@@ -2920,23 +2923,29 @@
       highlight(element)
 
       // Place cursor after the prefix in the new list item.
+      // For split: cursor at start of contentAfter. For continue: cursor at end of (empty) content.
       const newItems = element.querySelectorAll('.md-listitem')
       const newItem = newItems[newItems.length - 1]
       if (newItem) {
         const newContent = newItem.querySelector('.md-listcontent')
         if (newContent) {
           const newRange = document.createRange()
+          // Place cursor on the actual text node, not the element.
+          // This ensures saveOffset/restoreOffset work correctly.
           if (newContent.firstChild) {
-            newRange.setStart(newContent.firstChild, newContent.firstChild.textContent.length)
+            newRange.setStart(newContent.firstChild, 0)
           } else {
             newRange.setStart(newContent, 0)
           }
           newRange.collapse(true)
           sel.removeAllRanges()
           sel.addRange(newRange)
+          // Save offset NOW so debounceHighlight restores here.
+          pendingOffset = saveOffset()
         }
       }
       debounceHighlight.cancel()
+      skipNextKeyup = true // prevent keyup from scheduling another debounce
     }
 
     function insertText(text) {
@@ -3002,6 +3011,7 @@
       highlight(element)
       restore({start: mapPos(pos.start), end: mapPos(pos.end), dir: pos.dir})
       debounceHighlight.cancel()
+      skipNextKeyup = true
     }
 
     function save() {
@@ -3160,7 +3170,7 @@
         for (const child of parent.childNodes) {
           if (child.nodeType === Node.TEXT_NODE) {
             const len = child.textContent.length
-            if (current + len >= offset) {
+            if (current < offset && current + len >= offset) {
               const r = document.createRange()
               r.setStart(child, offset - current)
               r.collapse(true)
