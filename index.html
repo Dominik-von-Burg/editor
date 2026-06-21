@@ -2929,14 +2929,13 @@
       if (newItem) {
         const newContent = newItem.querySelector('.md-listcontent')
         if (newContent) {
-          const newRange = document.createRange()
-          // Place cursor on the actual text node, not the element.
-          // This ensures saveOffset/restoreOffset work correctly.
-          if (newContent.firstChild) {
-            newRange.setStart(newContent.firstChild, 0)
-          } else {
-            newRange.setStart(newContent, 0)
+          // Ensure there's a text node to place cursor on.
+          // When continuing (empty content), highlight() creates no text node.
+          if (!newContent.firstChild) {
+            newContent.appendChild(document.createTextNode(''))
           }
+          const newRange = document.createRange()
+          newRange.setStart(newContent.firstChild, 0)
           newRange.collapse(true)
           sel.removeAllRanges()
           sel.addRange(newRange)
