@@ -21,7 +21,7 @@ A single-file markdown editor that lives in one `notes.html` file — no build s
 
 **Live:** [https://Dominik-von-Burg.github.io/editor/](https://Dominik-von-Burg.github.io/editor/)
 
-Open `notes.html` in any modern browser (Chrome, Edge, Firefox, Safari). No server required — it works from `file://` or any HTTP origin.
+Open `index.html` in any modern browser (Chrome, Edge, Firefox, Safari). No server required — it works from `file://` or any HTTP origin.
 
 For folder sync, use Chrome/Edge on `http://localhost` or `https://` (the File System Access API requires a secure context).
 
