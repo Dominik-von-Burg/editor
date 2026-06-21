@@ -1269,6 +1269,195 @@ test.describe('Bullet Marker Alignment', () => {
       expect(positions[i].left).toBeCloseTo(firstLeft, 0);
     }
   });
+
+  test('two unordered lists: markers and content align across both', async ({ page }) => {
+    await resetPage(page);
+
+    // First list
+    await page.keyboard.type('- Item A');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Item B');
+    await page.waitForTimeout(100);
+
+    // Exit first list
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+
+    // Content between
+    await page.keyboard.type('Middle text');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+
+    // Second list
+    await page.keyboard.type('- Item X');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Item Y');
+    await page.waitForTimeout(200);
+
+    // Check all markers align
+    const markerPositions = await page.evaluate(() => {
+      const markers = document.querySelectorAll('.md-listmarker');
+      return Array.from(markers).map(m => ({
+        left: m.getBoundingClientRect().left,
+        text: m.textContent,
+      }));
+    });
+
+    expect(markerPositions.length).toBeGreaterThanOrEqual(4);
+    const firstLeft = markerPositions[0].left;
+    for (let i = 1; i < markerPositions.length; i++) {
+      expect(markerPositions[i].left).toBeCloseTo(firstLeft, 0);
+    }
+
+    // Check all content aligns
+    const contentPositions = await page.evaluate(() => {
+      const contents = document.querySelectorAll('.md-listcontent');
+      return Array.from(contents).map(c => ({
+        left: c.getBoundingClientRect().left,
+        text: c.textContent,
+      }));
+    });
+
+    expect(contentPositions.length).toBeGreaterThanOrEqual(4);
+    const contentLeft = contentPositions[0].left;
+    for (let i = 1; i < contentPositions.length; i++) {
+      expect(contentPositions[i].left).toBeCloseTo(contentLeft, 0);
+    }
+  });
+
+  test('two ordered lists: markers and content align across both', async ({ page }) => {
+    await resetPage(page);
+
+    // First list
+    await page.keyboard.type('1. First');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Second');
+    await page.waitForTimeout(100);
+
+    // Exit first list
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+
+    // Content between
+    await page.keyboard.type('Middle');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+
+    // Second list
+    await page.keyboard.type('1. Again');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Once more');
+    await page.waitForTimeout(200);
+
+    // Check all markers align
+    const markerPositions = await page.evaluate(() => {
+      const markers = document.querySelectorAll('.md-listmarker');
+      return Array.from(markers).map(m => ({
+        left: m.getBoundingClientRect().left,
+        text: m.textContent,
+      }));
+    });
+
+    expect(markerPositions.length).toBeGreaterThanOrEqual(4);
+    const firstLeft = markerPositions[0].left;
+    for (let i = 1; i < markerPositions.length; i++) {
+      expect(markerPositions[i].left).toBeCloseTo(firstLeft, 0);
+    }
+
+    // Check all content aligns
+    const contentPositions = await page.evaluate(() => {
+      const contents = document.querySelectorAll('.md-listcontent');
+      return Array.from(contents).map(c => ({
+        left: c.getBoundingClientRect().left,
+        text: c.textContent,
+      }));
+    });
+
+    expect(contentPositions.length).toBeGreaterThanOrEqual(4);
+    const contentLeft = contentPositions[0].left;
+    for (let i = 1; i < contentPositions.length; i++) {
+      expect(contentPositions[i].left).toBeCloseTo(contentLeft, 0);
+    }
+  });
+
+  test('mixed unordered and ordered lists: each type aligns independently', async ({ page }) => {
+    await resetPage(page);
+
+    // Unordered list
+    await page.keyboard.type('- Alpha');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Beta');
+    await page.waitForTimeout(100);
+
+    // Exit
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+
+    // Ordered list
+    await page.keyboard.type('1. One');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Two');
+    await page.waitForTimeout(200);
+
+    // Check unordered markers align
+    const unorderedMarkers = await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      return Array.from(items)
+        .filter(item => item.querySelector('.md-listmarker')?.textContent.trim() === '-')
+        .map(item => {
+          const m = item.querySelector('.md-listmarker');
+          return { left: m.getBoundingClientRect().left, text: m.textContent };
+        });
+    });
+
+    if (unorderedMarkers.length > 1) {
+      const firstLeft = unorderedMarkers[0].left;
+      for (let i = 1; i < unorderedMarkers.length; i++) {
+        expect(unorderedMarkers[i].left).toBeCloseTo(firstLeft, 0);
+      }
+    }
+
+    // Check ordered markers align
+    const orderedMarkers = await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      return Array.from(items)
+        .filter(item => /^\d+/.test(item.querySelector('.md-listmarker')?.textContent || ''))
+        .map(item => {
+          const m = item.querySelector('.md-listmarker');
+          return { left: m.getBoundingClientRect().left, text: m.textContent };
+        });
+    });
+
+    if (orderedMarkers.length > 1) {
+      const firstLeft = orderedMarkers[0].left;
+      for (let i = 1; i < orderedMarkers.length; i++) {
+        expect(orderedMarkers[i].left).toBeCloseTo(firstLeft, 0);
+      }
+    }
+  });
 });
 
 test.describe('Multiple Lists', () => {
