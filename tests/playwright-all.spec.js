@@ -164,6 +164,26 @@ test.describe('Markdown Rendering', () => {
 });
 
 test.describe('Bullet Lists (unordered)', () => {
+  test('rapid Enter continues list (no debounce gap)', async ({ page }) => {
+    await resetPage(page);
+    // Type quickly without waiting for debounce (30ms)
+    await page.keyboard.type('- First');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Second');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Third');
+    await page.waitForTimeout(200);
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(3);
+
+    const markers = await page.locator('.md-listmarker').allTextContents();
+    expect(markers).toContain('- ');
+  });
+
   test('typing creates list', async ({ page }) => {
     await resetPage(page);
     await page.keyboard.type('- First');
