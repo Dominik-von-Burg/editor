@@ -125,6 +125,49 @@ test.describe('List split with real keyboard events', () => {
     expect(textContent).toBe('- First\n- Second\n');
   });
   
+  test('numbered list creation and auto-increment', async ({ page }) => {
+    await page.goto(`${BASE_URL}/index.html`);
+    
+    await page.click('article');
+    await page.waitForTimeout(100);
+    
+    // Type first item
+    await page.keyboard.type('1. Alpha');
+    await page.waitForTimeout(100);
+    
+    let items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(1);
+    
+    // Enter to continue
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    
+    await expect(items).toHaveCount(2);
+    
+    // Type second item
+    await page.keyboard.type('Beta');
+    await page.waitForTimeout(50);
+    
+    // Enter again
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    
+    await expect(items).toHaveCount(3);
+    
+    // Type third item
+    await page.keyboard.type('Gamma');
+    await page.waitForTimeout(50);
+    
+    const textContent = await page.locator('article').textContent();
+    expect(textContent).toBe('1. Alpha\n2. Beta\n3. Gamma\n');
+    
+    // Check markers (include trailing space from markerSpan)
+    const markers = await page.locator('.md-listmarker').allTextContents();
+    expect(markers).toContain('1. ');
+    expect(markers).toContain('2. ');
+    expect(markers).toContain('3. ');
+  });
+  
   test('double Enter exits list', async ({ page }) => {
     await page.goto(`${BASE_URL}/index.html`);
     
