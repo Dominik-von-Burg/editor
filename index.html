@@ -1490,6 +1490,7 @@
       timer = setTimeout(() => { timer = null; fn(...args) }, ms)
     }
     d.cancel = () => { clearTimeout(timer); timer = null }
+    Object.defineProperty(d, '_timer', { get: () => timer })
     return d
   }
 
@@ -2131,6 +2132,10 @@
         const idx = input.indexOf(ch, i)
         if (idx !== -1 && idx < next) next = idx
       }
+      // Check for next newline so list regex can match at line starts
+      // after blank lines or plain text paragraphs.
+      const nlIdx = input.indexOf('\n', i)
+      if (nlIdx !== -1 && nlIdx < next) next = nlIdx
 
       if (next === i) {
         frag.appendChild(document.createTextNode(input[i]))
@@ -2595,18 +2600,24 @@
     const listeners = []
     const history = []
     let at = -1, prev
-    let pendingOffset = null // character offset captured before DOM change
+    let pendingCursor = null // cursor state captured before DOM change
     let skipNextInput = false // prevent input handler during programmatic DOM changes
     let skipNextKeyup = false // prevent keyup handler after list actions
+    let composing = false // IME composition in progress
 
     const debounceHighlight = debounce(30, () => {
-      const offset = pendingOffset !== null ? pendingOffset : saveOffset()
-      pendingOffset = null
+      // Skip re-render during IME composition (CJK input)
+      if (composing) return
+      const cursor = pendingCursor !== null ? pendingCursor : captureCursor()
+      pendingCursor = null
+      // Skip restoration when cursor was already placed explicitly
+      // (e.g. by insertListPrefix or indentSelection).
+      if (cursor && cursor.skip) return
       // Strip any native <ul>/<ol>/<li> the browser may have auto-created
       // (some browsers ignore plaintext-only and format lists natively).
       stripNativeLists(element)
       highlight(element)
-      restoreOffset(offset)
+      restoreCursor(cursor)
     })
 
     function stripNativeLists(el) {
@@ -2650,13 +2661,18 @@
 
       if (event.key === 'Tab') {
         preventDefault(event)
-        pendingOffset = null // don't let pending offset interfere
+        pendingCursor = null // don't let pending cursor interfere
+        debounceHighlight.cancel() // cancel stray debounce before indent
         indentSelection(event.shiftKey)
         return
       }
 
       if (event.key === 'Enter') {
-        pendingOffset = null // don't let pending offset interfere
+        pendingCursor = null // don't let pending cursor interfere
+        // Cancel any stray debounce from the previous keyup. Without this,
+        // a stale debounce fires with an old offset before insertListPrefix
+        // can cancel it, causing cursor jump after list split/continue.
+        debounceHighlight.cancel()
 
         // Shift+Enter: insert a blank line (break out of list if inside one)
         if (event.shiftKey) {
@@ -2701,10 +2717,12 @@
         recordHistory()
         recording = true
       }
-      // Capture cursor offset now, before the character is inserted.
+      // Capture cursor now, before the character is inserted.
       // The debounce highlight will use this to restore position after re-render.
-      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        pendingOffset = saveOffset()
+      // Skip if pendingCursor.skip is set (list operation in progress).
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey
+          && !(pendingCursor && pendingCursor.skip)) {
+        pendingCursor = captureCursor()
       }
     })
     on('keyup', event => {
@@ -2759,6 +2777,42 @@
     })
     on('cut', () => setTimeout(recordHistory, 10))
     on('beforeinput', event => {
+      // If a list operation has already handled this input, prevent
+      // the browser default for ALL input types (not just the ones
+      // we explicitly handle below). This stops the browser from
+      // inserting extra newlines on Enter in plaintext-only mode.
+      console.log('[BI] type=' + event.inputType + ' pendingCursor=' + JSON.stringify(pendingCursor))
+      if (pendingCursor && pendingCursor.skip) {
+        // List operation just ran; browser may have misplaced cursor.
+        // For text input, redirect to the correct list content span.
+        if (event.inputType === 'insertText' && event.data) {
+          // Find the last list item and insert text there.
+          const items = element.querySelectorAll('.md-listitem')
+          if (items.length) {
+            const lastItem = items[items.length - 1]
+            const content = lastItem.querySelector('.md-listcontent')
+            if (content) {
+              event.preventDefault()
+              // Insert text at end of content span.
+              const doc = content.ownerDocument
+              const inserted = doc.createTextNode(event.data)
+              content.appendChild(inserted)
+              // Place cursor after inserted text.
+              const r = document.createRange()
+              r.setStart(inserted, event.data.length)
+              r.collapse(true)
+              const s = getSelection()
+              s.removeAllRanges()
+              s.addRange(r)
+            }
+          }
+        } else if (event.inputType === 'insertParagraph' ||
+                   event.inputType === 'insertLineBreak') {
+          event.preventDefault()
+        }
+        pendingCursor = null // clear after use
+        return
+      }
       if (event.inputType === 'historyUndo') doUndo(event)
       if (event.inputType === 'historyRedo') doRedo(event)
       // Trigger re-render after text input. This catches cases where
@@ -2769,6 +2823,7 @@
           event.inputType === 'insertLineBreak' ||
           event.inputType === 'insertOrderedList' ||
           event.inputType === 'insertUnorderedList') {
+        console.log('[BI] handling input type=' + event.inputType)
         // Prevent browser auto-formatting of lists. We handle list
         // rendering ourselves via parseMarkdown, and the browser's
         // auto-formatting would create <ul>/<ol> that break our span-based DOM.
@@ -2777,10 +2832,15 @@
           event.preventDefault()
           return
         }
-        // Capture cursor offset before text is inserted, then add
+        // Capture cursor before text is inserted, then adjust for
         // the length of inserted text so restore places cursor after it.
         const insertedLen = (event.data || '').length || 1
-        pendingOffset = saveOffset() + insertedLen
+        const cur = captureCursor()
+        if (cur.type === 'list') {
+          pendingCursor = { type: 'list', itemIndex: cur.itemIndex, contentOffset: cur.contentOffset + insertedLen }
+        } else {
+          pendingCursor = { type: 'plain', offset: cur.offset + insertedLen }
+        }
         debounceHighlight()
       }
     })
@@ -2788,6 +2848,15 @@
     // re-render even if beforeinput/keyup are missed (e.g. IME, assistive tech).
     on('input', event => {
       if (skipNextInput) { skipNextInput = false; return }
+      if (prev !== toString()) debounceHighlight()
+    })
+
+    // IME composition protection: skip re-render during composition
+    // to avoid corrupting CJK input (Japanese, Chinese, Korean).
+    on('compositionstart', () => { composing = true })
+    on('compositionend', () => {
+      composing = false
+      // Re-render after composition ends to apply markdown formatting
       if (prev !== toString()) debounceHighlight()
     })
 
@@ -2817,7 +2886,7 @@
         // Fallback: parse raw textContent when DOM hasn't rendered yet
         // (debounce gap). This ensures rapid Enter still continues lists.
         const raw = element.textContent
-        const offset = saveOffset()
+        const offset = getPlainOffset()
         // Find the line containing the cursor
         const before = raw.slice(0, offset)
         const lineStart = before.lastIndexOf('\n') + 1
@@ -2893,7 +2962,7 @@
         // Fallback: raw text mode (debounce gap, DOM not rendered yet).
         // Remove the list prefix from the current line.
         const raw = element.textContent
-        const offset = saveOffset()
+        const offset = getPlainOffset()
         const before = raw.slice(0, offset)
         const after = raw.slice(offset)
         // Find the current line and strip its list prefix
@@ -2913,6 +2982,7 @@
     }
 
     function insertListPrefix(prefix) {
+      console.log('[ILP] called with prefix=' + JSON.stringify(prefix))
       skipNextInput = true
       const sel = getSelection()
       if (!sel || !sel.rangeCount) return
@@ -2921,8 +2991,13 @@
         ? anchor.closest('.md-listitem')
         : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
 
-      let fullContent, marker, textBefore, textAfter
+      let fullContent, marker, textBefore, textAfter, itemIndex
+      let contentBefore, contentAfter
       if (listItem) {
+        // Capture item index BEFORE DOM replacement so we can find
+        // the correct target item after highlight() rerenders.
+        const itemsBefore = Array.from(element.querySelectorAll('.md-listitem'))
+        itemIndex = itemsBefore.indexOf(listItem)
         const contentSpan = listItem.querySelector('.md-listcontent')
         const markerSpan = listItem.querySelector('.md-listmarker')
         fullContent = contentSpan ? (contentSpan.textContent || '') : ''
@@ -2936,8 +3011,8 @@
         preRange.setEnd(range.startContainer, range.startOffset)
         cursorOffset = preRange.toString().length
 
-        const contentBefore = fullContent.slice(0, cursorOffset)
-        const contentAfter = fullContent.slice(cursorOffset)
+        contentBefore = fullContent.slice(0, cursorOffset)
+        contentAfter = fullContent.slice(cursorOffset)
 
         const r = document.createRange()
         r.setStart(element, 0)
@@ -2951,37 +3026,71 @@
         const newRaw = textBefore + marker + contentBefore + '\n' + prefix + contentAfter + textAfter
         element.textContent = newRaw
       } else {
+        itemIndex = -1 // fallback path, no item tracking
         // Fallback: raw text mode (debounce gap, DOM not rendered yet).
         // Insert newline + prefix at cursor position.
         const raw = element.textContent
-        const offset = saveOffset()
-        const before = raw.slice(0, offset)
-        const after = raw.slice(offset)
-        element.textContent = before + '\n' + prefix + after
+        const offset = getPlainOffset()
+        contentBefore = raw.slice(0, offset)
+        contentAfter = raw.slice(offset)
+        element.textContent = contentBefore + '\n' + prefix + contentAfter
       }
       highlight(element)
-
-      // Place cursor after the prefix in the new list item.
-      // For split: cursor at start of contentAfter. For continue: cursor at end of (empty) content.
-      const newItems = element.querySelectorAll('.md-listitem')
-      const newItem = newItems[newItems.length - 1]
-      if (newItem) {
-        const newContent = newItem.querySelector('.md-listcontent')
-        if (newContent) {
-          // Ensure there's a text node to place cursor on.
-          // When continuing (empty content), highlight() creates no text node.
-          if (!newContent.firstChild) {
-            newContent.appendChild(document.createTextNode(''))
+      const allItems = element.querySelectorAll('.md-listitem')
+      const targetIndex = contentAfter !== undefined && contentAfter !== ''
+        ? itemIndex + 1
+        : allItems.length - 1
+      // In plaintext-only mode, the browser may override cursor placement
+      // after keydown processing. Use a selectionchange listener to catch
+      // the browser's repositioning and correct it.
+      let corrected = false
+      const fixCursor = () => {
+        if (corrected) { document.removeEventListener('selectionchange', fixCursor); return }
+        const sel = getSelection()
+        if (!sel.isCollapsed) { document.removeEventListener('selectionchange', fixCursor); return }
+        const parent = sel.anchorNode?.parentElement
+        if (parent && parent.classList.contains('md-listcontent')) {
+          document.removeEventListener('selectionchange', fixCursor)
+          return
+        }
+        // Browser moved cursor out of list content; re-place it.
+        corrected = true
+        document.removeEventListener('selectionchange', fixCursor)
+        const items = element.querySelectorAll('.md-listitem')
+        const targetItem = items[targetIndex]
+        if (targetItem) {
+          const targetContent = targetItem.querySelector('.md-listcontent')
+          if (targetContent) {
+            if (!targetContent.firstChild) {
+              targetContent.appendChild(document.createTextNode(''))
+            }
+            const r = document.createRange()
+            r.setStart(targetContent.firstChild, 0)
+            r.collapse(true)
+            sel.removeAllRanges()
+            sel.addRange(r)
           }
-          const newRange = document.createRange()
-          newRange.setStart(newContent.firstChild, 0)
-          newRange.collapse(true)
-          sel.removeAllRanges()
-          sel.addRange(newRange)
-          // Save offset NOW so debounceHighlight restores here.
-          pendingOffset = saveOffset()
         }
       }
+      document.addEventListener('selectionchange', fixCursor)
+      // Also try immediate placement
+      const targetItem = allItems[targetIndex]
+      if (targetItem) {
+        const targetContent = targetItem.querySelector('.md-listcontent')
+        if (targetContent) {
+          if (!targetContent.firstChild) {
+            targetContent.appendChild(document.createTextNode(''))
+          }
+          const r = document.createRange()
+          r.setStart(targetContent.firstChild, 0)
+          r.collapse(true)
+          const s = getSelection()
+          s.removeAllRanges()
+          s.addRange(r)
+        }
+      }
+      pendingCursor = { skip: true }
+      console.log('[ILP] set pendingCursor.skip, debounce cancelled')
       debounceHighlight.cancel()
       skipNextKeyup = true // prevent keyup from scheduling another debounce
     }
@@ -3187,10 +3296,23 @@
       }
     }
 
-    // Lightweight offset-based save/restore for debounce highlight.
+    // List-aware cursor capture and restore for debounce highlight.
     // Unlike save()/restore() which capture DOM node references that go
-    // stale after re-render, these just use a flat character offset.
-    function saveOffset() {
+    // stale after re-render, these use structured metadata that survives
+    // a full re-render of the article.
+    //
+    // Two cursor types:
+    //   { type: 'list', itemIndex, contentOffset } — inside a list item
+    //   { type: 'plain', offset } — in plain text (fallback)
+    //
+    // This avoids the fragility of absolute text offsets when markdown
+    // markers (-, 1., indentation) are rendered in separate spans from
+    // content. The list-aware path places cursor directly into the
+    // target .md-listcontent span.
+
+    // Plain text offset helper — used in fallback paths where DOM is
+    // not yet rendered (debounce gap) and we operate on textContent.
+    function getPlainOffset() {
       const s = getSelection()
       if (!s || !s.rangeCount) return 0
       const range = document.createRange()
@@ -3199,21 +3321,118 @@
       return range.toString().length
     }
 
-    function restoreOffset(offset) {
+    function captureCursor() {
+      const s = getSelection()
+      if (!s || !s.rangeCount) return { type: 'plain', offset: 0 }
+
+      const anchor = s.anchorNode
+      // Find the .md-listcontent if cursor is inside a list item.
+      // Walk up from anchorNode (which may be a text node) to find
+      // a .md-listcontent element.
+      let contentEl = null
+      let node = anchor
+      while (node && node !== element) {
+        if (node.nodeType === Node.ELEMENT_NODE && node.classList && node.classList.contains('md-listcontent')) {
+          contentEl = node
+          break
+        }
+        node = node.parentElement
+      }
+
+      if (contentEl) {
+        // Cursor is inside a list item's content span.
+        const listItem = contentEl.parentElement
+        const allItems = Array.from(element.querySelectorAll('.md-listitem'))
+        const itemIndex = allItems.indexOf(listItem)
+
+        // Compute offset within the content span.
+        let contentOffset = 0
+        if (anchor === contentEl) {
+          // Anchor is the element itself — use anchorOffset as child index,
+          // then compute text length up to that child.
+          let i = 0
+          while (i < anchor.childNodes.length && i < s.anchorOffset) {
+            if (anchor.childNodes[i].nodeType === Node.TEXT_NODE) {
+              contentOffset += anchor.childNodes[i].textContent.length
+            }
+            i++
+          }
+        } else if (anchor.nodeType === Node.TEXT_NODE) {
+          // Anchor is a text node inside content span.
+          contentOffset = 0
+          const range = document.createRange()
+          range.setStart(contentEl, 0)
+          range.setEnd(anchor, s.anchorOffset)
+          contentOffset = range.toString().length
+        }
+
+        return { type: 'list', itemIndex: Math.max(0, itemIndex), contentOffset: Math.max(0, contentOffset) }
+      }
+
+      // Fallback: plain text offset.
+      const range = document.createRange()
+      range.setStart(element, 0)
+      range.setEnd(s.anchorNode, s.anchorOffset)
+      return { type: 'plain', offset: range.toString().length }
+    }
+
+    function restoreCursor(cursor) {
+      if (!cursor || cursor.skip) return
+
+      // Backward compat: if cursor is a number, treat as plain offset.
+      if (typeof cursor === 'number') {
+        cursor = { type: 'plain', offset: cursor }
+      }
+
       const s = getSelection()
       if (!s) return
+
+      if (cursor.type === 'list') {
+        const items = element.querySelectorAll('.md-listitem')
+        const item = items[cursor.itemIndex]
+        if (!item) {
+          // Item not found (list structure changed). Fall back to plain.
+          restorePlainCursor(cursor.contentOffset, s)
+          return
+        }
+        const content = item.querySelector('.md-listcontent')
+        if (!content) {
+          restorePlainCursor(cursor.contentOffset, s)
+          return
+        }
+        // Ensure there's a text node to place cursor on.
+        if (!content.firstChild) {
+          content.appendChild(document.createTextNode(''))
+        }
+        const maxOffset = content.firstChild.textContent.length
+        const offset = Math.min(cursor.contentOffset, maxOffset)
+        const r = document.createRange()
+        r.setStart(content.firstChild, offset)
+        r.collapse(true)
+        s.removeAllRanges()
+        s.addRange(r)
+        return
+      }
+
+      if (cursor.type === 'plain') {
+        restorePlainCursor(cursor.offset, s)
+        return
+      }
+    }
+
+    // Restore a plain (non-list) cursor by walking the DOM tree.
+    function restorePlainCursor(offset, sel) {
       let current = 0
       let found = false
+      let targetNode = null
+      let targetOffset = 0
       const visit = (parent) => {
         for (const child of parent.childNodes) {
           if (child.nodeType === Node.TEXT_NODE) {
             const len = child.textContent.length
             if (current < offset && current + len >= offset) {
-              const r = document.createRange()
-              r.setStart(child, offset - current)
-              r.collapse(true)
-              s.removeAllRanges()
-              s.addRange(r)
+              targetNode = child
+              targetOffset = offset - current
               found = true
               return 'stop'
             }
@@ -3225,26 +3444,53 @@
         }
       }
       visit(element)
-      // Fallback: place cursor at end of last visible text node
-      if (!found) {
-        let lastText = null
-        const findLast = (parent) => {
-          for (const child of parent.childNodes) {
-            if (child.nodeType === Node.TEXT_NODE && child.textContent.trim()) {
-              lastText = child
-            } else if (child.nodeType === Node.ELEMENT_NODE) {
-              findLast(child)
+
+      if (found && targetNode) {
+        // List-aware adjustment: if cursor landed in a marker span,
+        // move it to the corresponding content span instead.
+        const markerEl = targetNode.nodeType === 1
+          ? targetNode.closest('.md-listmarker')
+          : targetNode.parentElement?.closest('.md-listmarker')
+        if (markerEl) {
+          const listItem = markerEl.closest('.md-listitem')
+          if (listItem) {
+            const contentSpan = listItem.querySelector('.md-listcontent')
+            if (contentSpan) {
+              if (!contentSpan.firstChild) {
+                contentSpan.appendChild(document.createTextNode(''))
+              }
+              targetNode = contentSpan.firstChild
+              targetOffset = 0
             }
           }
         }
-        findLast(element)
-        if (lastText) {
-          const r = document.createRange()
-          r.setStart(lastText, lastText.textContent.length)
-          r.collapse(true)
-          s.removeAllRanges()
-          s.addRange(r)
+
+        const r = document.createRange()
+        r.setStart(targetNode, targetOffset)
+        r.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(r)
+        return
+      }
+
+      // Fallback: place cursor at end of last visible text node
+      let lastText = null
+      const findLast = (parent) => {
+        for (const child of parent.childNodes) {
+          if (child.nodeType === Node.TEXT_NODE && child.textContent.trim()) {
+            lastText = child
+          } else if (child.nodeType === Node.ELEMENT_NODE) {
+            findLast(child)
+          }
         }
+      }
+      findLast(element)
+      if (lastText) {
+        const r = document.createRange()
+        r.setStart(lastText, lastText.textContent.length)
+        r.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(r)
       }
     }
 
