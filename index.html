@@ -3038,8 +3038,14 @@
         const markerSpan = listItem.querySelector('.md-listmarker')
         fullContent = contentSpan ? (contentSpan.textContent || '') : ''
         marker = markerSpan ? markerSpan.textContent : ''
-
-        // Calculate cursor offset within content span.
+        const markerMatch = marker.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)$/)
+        const existingIndent = markerMatch ? markerMatch[1] : ''
+        const existingSpacing = markerMatch ? markerMatch[3] : ' '
+        const markerType = markerMatch ? markerMatch[2] : '-'
+        const isOrdered = /^\d+[.)]$/.test(markerType)
+        const normalizedPrefix = isOrdered
+          ? prefix
+          : existingIndent + markerType + existingSpacing
         let cursorOffset = fullContent.length // default: end of content
         const range = sel.getRangeAt(0)
         const preRange = document.createRange()
@@ -3059,7 +3065,7 @@
         r.setEndAfter(element.lastChild)
         textAfter = r.toString()
 
-        const newRaw = textBefore + marker + contentBefore + '\n' + prefix + contentAfter + textAfter
+        const newRaw = textBefore + marker + contentBefore + '\n' + normalizedPrefix + contentAfter + textAfter
         element.textContent = newRaw
       } else {
         itemIndex = -1 // fallback path, no item tracking

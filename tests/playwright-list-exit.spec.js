@@ -268,4 +268,88 @@ test.describe('List Exit Cursor Behavior', () => {
     const content = await page.locator('article').textContent();
     expect(content).toContain('xxxxxxxxxx');
   });
+
+  test('all list markers have consistent spacing', async ({ page }) => {
+    await resetPage(page);
+
+    // Create a list by typing "- item1" then Enter, then "item2"
+    await page.keyboard.type('- item1');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('item2');
+    await page.waitForTimeout(200);
+
+    // Check all list markers have the same format
+    const markers = await page.evaluate(() => {
+      const markerSpans = document.querySelectorAll('.md-listmarker');
+      return Array.from(markerSpans).map(span => span.textContent);
+    });
+
+    console.log('Markers:', JSON.stringify(markers));
+
+    // All markers should have the same format (either all "- " or all "-")
+    // The important thing is consistency
+    const uniqueMarkers = [...new Set(markers)];
+    expect(uniqueMarkers.length).toBe(1);
+  });
+
+  test('marker spacing is preserved after re-render', async ({ page }) => {
+    await resetPage(page);
+
+    // Create list
+    await page.keyboard.type('- one');
+    await page.waitForTimeout(50);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(50);
+    await page.keyboard.type('two');
+    await page.waitForTimeout(50);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(50);
+    await page.keyboard.type('three');
+    await page.waitForTimeout(200);
+
+    // Force a re-render by triggering highlight
+    await page.evaluate(() => {
+      const article = document.querySelector('article');
+      parseMarkdown(article);
+    });
+    await page.waitForTimeout(100);
+
+    // Check markers after re-render
+    const markers = await page.evaluate(() => {
+      const markerSpans = document.querySelectorAll('.md-listmarker');
+      return Array.from(markerSpans).map(span => span.textContent);
+    });
+
+    console.log('Markers after re-render:', JSON.stringify(markers));
+
+    // All markers should have consistent spacing
+    const uniqueMarkers = [...new Set(markers)];
+    expect(uniqueMarkers.length).toBe(1);
+  });
+
+  test('markers stay consistent when typing without space after dash', async ({ page }) => {
+    await resetPage(page);
+
+    // Type "-item1" (no space after dash), then Enter
+    await page.keyboard.type('-item1');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('item2');
+    await page.waitForTimeout(200);
+
+    // Check all list markers
+    const markers = await page.evaluate(() => {
+      const markerSpans = document.querySelectorAll('.md-listmarker');
+      return Array.from(markerSpans).map(span => span.textContent);
+    });
+
+    console.log('Markers (no space after dash):', JSON.stringify(markers));
+
+    // All markers should have consistent spacing
+    const uniqueMarkers = [...new Set(markers)];
+    expect(uniqueMarkers.length).toBe(1);
+  });
 });
