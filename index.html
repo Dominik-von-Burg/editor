@@ -18,6 +18,8 @@
 
     background-color: #fff;
     --elevated: #fff;
+    --glass: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.3);
     --link: #0066cc;
     --text: #161616;
     --outline: #007aff;
@@ -25,6 +27,8 @@
     @media (prefers-color-scheme: dark) {
       background-color: #000;
       --elevated: #121212;
+      --glass: rgba(30, 30, 30, 0.7);
+      --glass-border: rgba(255, 255, 255, 0.1);
       --link: #58a6ff;
       --text: #fff;
     }
@@ -225,8 +229,9 @@
     right: 16px;
     bottom: 77px;
     box-shadow: 0 19px 38px rgba(0, 0, 0, 0.10), 0 15px 12px rgba(0, 0, 0, 0.05);
-    background: var(--elevated);
+    background: var(--glass);
     backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
     border-radius: 10px;
     z-index: 2;
   }
@@ -475,7 +480,9 @@
     right: 17px;
     top: 17px;
 
-    background: var(--elevated);
+    background: var(--glass);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
     color: var(--text);
     border-radius: 10px;
     box-shadow: 0 19px 38px rgba(0, 0, 0, 0.10), 0 15px 12px rgba(0, 0, 0, 0.05);
