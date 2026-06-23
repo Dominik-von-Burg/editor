@@ -3786,8 +3786,10 @@
 
     return {
       set(content) {
+        const cursor = captureCursor()
         element.textContent = content
         highlight(element)
+        restoreCursor(cursor)
       },
       destroy() {
         for (const [type, fn] of listeners) editor.removeEventListener(type, fn)
