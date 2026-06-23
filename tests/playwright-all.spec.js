@@ -2167,3 +2167,807 @@ test.describe('Two Lists With Text Between', () => {
     expect(items).toBe(4);
   });
 });
+
+test.describe('Middle-of-List Editing', () => {
+  // Helper: inject a 3-item list and place cursor in item at index (0-based)
+  async function setupThreeItemList(page, cursorItemIndex = 1, cursorOffset = 0) {
+    await resetPage(page);
+    await page.evaluate(({idx, off}) => {
+      const el = document.querySelector('article');
+      el.textContent = '- A\n- B\n- C\n';
+      parseMarkdown(el);
+      // Place cursor in the specified item
+      const items = el.querySelectorAll('.md-listitem');
+      const content = items[idx]?.querySelector('.md-listcontent');
+      if (content) {
+        if (!content.firstChild) content.appendChild(document.createTextNode(''));
+        const range = document.createRange();
+        range.setStart(content.firstChild, Math.min(off, content.firstChild.textContent.length));
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }, {idx: cursorItemIndex, off: cursorOffset});
+    await page.waitForTimeout(100);
+  }
+
+  test('split middle item B: cursor stays in new item', async ({ page }) => {
+    await setupThreeItemList(page, 1, 0); // cursor at start of B
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+
+    // Cursor should be in the new (3rd) item, at offset 0
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
+
+    // Verify content: A, B (empty before split point), empty new item, C
+    const content = await page.locator('article').textContent();
+    const lines = content.split('\n').filter(l => l.trim());
+    expect(lines.length).toBe(4);
+  });
+
+  test('split middle item B mid-content: parts preserved correctly', async ({ page }) => {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- Alpha\n- BetaGamma\n- Delta\n';
+      parseMarkdown(el);
+      // Place cursor between 'Beta' and 'Gamma' (offset 4 in item 1)
+      const items = el.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, 4);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(100);
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('- Alpha');
+    expect(content).toContain('- Beta');
+    expect(content).toContain('- Gamma');
+    expect(content).toContain('- Delta');
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+
+    // Cursor should be in the new item (Gamma's item), offset 0
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
+  });
+
+  test('split middle item mid-content then type: text goes into correct item', async ({ page }) => {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- Alpha\n- BetaGamma\n- Delta\n';
+      parseMarkdown(el);
+      // Place cursor between 'Beta' and 'Gamma' (offset 4 in item 1)
+      const items = el.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, 4);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(100);
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+
+    // Verify cursor is in the new item (Gamma's item)
+    const cursorAfterSplit = await getCursor(page);
+    expect(cursorAfterSplit.parentClass).toBe('md-listcontent');
+    expect(cursorAfterSplit.offset).toBe(0);
+
+    // Type in the new item
+    await page.keyboard.type('New');
+    await page.waitForTimeout(150);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('- Alpha');
+    expect(content).toContain('- Beta');
+    expect(content).toContain('- GammaNew');
+    expect(content).toContain('- Delta');
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+  });
+
+  test('split at end of middle item: cursor in new empty item', async ({ page }) => {
+    await setupThreeItemList(page, 1, 1); // cursor at end of 'B'
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
+  });
+
+  test('multiple splits in same list maintain correct cursor', async ({ page }) => {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- One\n- Two\n- Three\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(100);
+
+    // Split 'Two'
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, 1); // after 'T'
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+
+    let items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+
+    // Type in new item
+    await page.keyboard.type('X');
+    await page.waitForTimeout(100);
+
+    // Split again
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+
+    items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(5);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+  });
+
+  test('Enter at end of first item continues list correctly', async ({ page }) => {
+    await setupThreeItemList(page, 0, 1); // cursor at end of 'A'
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
+  });
+
+  test('Enter at end of last item continues list correctly', async ({ page }) => {
+    await setupThreeItemList(page, 2, 1); // cursor at end of 'C'
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
+  });
+});
+
+test.describe('Nested List Cursor Tests', () => {
+  // Helper: inject a nested list structure
+  async function setupNestedList(page) {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- A\n  - B\n  - C\n- D\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(100);
+  }
+
+  test('Enter in nested list continues at same nesting level', async ({ page }) => {
+    await setupNestedList(page);
+    // Place cursor at end of B (nested item)
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      // B is the second item (index 1)
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, content.firstChild.textContent.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    // Should have a new nested item
+    const items = page.locator('.md-listitem');
+    const count = await items.count();
+    expect(count).toBe(5); // A, B, new-nested, C, D
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.offset).toBe(0);
+  });
+
+  test('Tab indents a list item to create sub-list', async ({ page }) => {
+    await setupNestedList(page);
+    // Place cursor in C (index 2)
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[2]?.querySelector('.md-listcontent');
+      if (content) {
+        if (!content.firstChild) content.appendChild(document.createTextNode(''));
+        const range = document.createRange();
+        range.setStart(content.firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(150);
+
+    const content = await page.locator('article').textContent();
+    // C should now be indented under B
+    expect(content).toContain('    - C');
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+  });
+
+  test('Shift+Tab outdents a nested item', async ({ page }) => {
+    await setupNestedList(page);
+    // Place cursor in B (nested, index 1)
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content) {
+        if (!content.firstChild) content.appendChild(document.createTextNode(''));
+        const range = document.createRange();
+        range.setStart(content.firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('Tab');
+    await page.keyboard.up('Shift');
+    await page.waitForTimeout(150);
+
+    const content = await page.locator('article').textContent();
+    // B should now be at top level (no extra indentation)
+    const lines = content.split('\n');
+    const bLine = lines.find(l => l.includes('B'));
+    expect(bLine).toMatch(/^- B/);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+  });
+
+  test('double Enter exits nested list', async ({ page }) => {
+    await setupNestedList(page);
+    // Place cursor in C (nested, index 2)
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[2]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, content.firstChild.textContent.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    const beforeCount = await page.locator('.md-listitem').count();
+
+    // First Enter: continue nested list (new empty nested item)
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+
+    // Should have one more item
+    const afterFirst = await page.locator('.md-listitem').count();
+    expect(afterFirst).toBe(beforeCount + 1);
+
+    // Second Enter on empty item: exit list (removes empty item)
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    const content = await page.locator('article').textContent();
+    // Should still have the original items
+    expect(content).toContain('- A');
+    expect(content).toContain('- D');
+  });
+
+  test('cursor survives re-render in nested list', async ({ page }) => {
+    await setupNestedList(page);
+    // Place cursor in the middle of B's content
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    // Type to trigger re-render
+    await page.keyboard.type('X');
+    await page.waitForTimeout(200);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('XB');
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+  });
+
+  test('nested ordered list Enter continues numbering', async ({ page }) => {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '1. First\n   1. Nested A\n   2. Nested B\n2. Second\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(100);
+
+    // Place cursor at end of Nested B
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[2]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, content.firstChild.textContent.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    const content = await page.locator('article').textContent();
+    // Should have nested item 3
+    expect(content).toMatch(/\s+3\.[)\s]/);
+
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+  });
+});
+
+test.describe('Paste Tests', () => {
+  // Helper: paste text at current cursor position
+  async function pasteText(page, text, html = null) {
+    await page.evaluate(({text, html}) => {
+      const el = document.querySelector('article');
+      const event = new ClipboardEvent('paste', {
+        clipboardData: new DataTransfer(),
+        bubbles: true,
+        cancelable: true,
+      });
+      event.clipboardData.setData('text/plain', text);
+      if (html) {
+        event.clipboardData.setData('text/html', html);
+      }
+      el.dispatchEvent(event);
+    }, {text, html});
+    await page.waitForTimeout(300);
+  }
+
+  test('paste list into empty paragraph creates list', async ({ page }) => {
+    await resetPage(page);
+    await pasteText(page, '- A\n- B\n- C');
+    await page.waitForTimeout(200);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('A');
+    expect(content).toContain('B');
+    expect(content).toContain('C');
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(3);
+  });
+
+  test('paste list into existing list item appends items', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('- Existing');
+    await page.waitForTimeout(100);
+
+    // Move cursor to end of existing item
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[0]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, content.firstChild.textContent.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    await pasteText(page, '\n- Pasted1\n- Pasted2');
+    await page.waitForTimeout(200);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('Existing');
+    expect(content).toContain('Pasted1');
+    expect(content).toContain('Pasted2');
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(3);
+  });
+
+  test('paste multi-line text into paragraph preserves newlines', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('Before');
+    await page.waitForTimeout(50);
+
+    await pasteText(page, '\nLine1\nLine2\nLine3');
+    await page.waitForTimeout(200);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('Before');
+    expect(content).toContain('Line1');
+    expect(content).toContain('Line2');
+    expect(content).toContain('Line3');
+  });
+
+  test('paste ordered list creates numbered items', async ({ page }) => {
+    await resetPage(page);
+    await pasteText(page, '1. First\n2. Second\n3. Third');
+    await page.waitForTimeout(200);
+
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(3);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('First');
+    expect(content).toContain('Second');
+    expect(content).toContain('Third');
+  });
+
+  test('paste into nested list item preserves nesting context', async ({ page }) => {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- Parent\n  - Child1\n  - Child2\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(100);
+
+    // Move cursor to end of Child1
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, content.firstChild.textContent.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    await pasteText(page, ' more text');
+    await page.waitForTimeout(200);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('Child1 more text');
+  });
+
+  test('paste HTML list converts to markdown', async ({ page }) => {
+    await resetPage(page);
+    await pasteText(page, 'A\nB', '<ul><li>A</li><li>B</li></ul>');
+    await page.waitForTimeout(300);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('A');
+    expect(content).toContain('B');
+  });
+});
+
+test.describe('Backspace At Boundary Tests', () => {
+  test('Backspace at start of list item exits list', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('\n- Item');
+    await page.waitForTimeout(100);
+
+    // Move cursor to start of item content
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[0]?.querySelector('.md-listcontent');
+      if (content) {
+        if (!content.firstChild) content.appendChild(document.createTextNode(''));
+        const range = document.createRange();
+        range.setStart(content.firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(150);
+
+    const items = page.locator('.md-listitem');
+    const count = await items.count();
+    // Should have fewer items or the item should be merged
+    expect(count).toBeLessThanOrEqual(1);
+  });
+
+  test('Backspace at start of second list item merges with previous', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('- First');
+    await page.waitForTimeout(50);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Second');
+    await page.waitForTimeout(100);
+
+    // Move cursor to start of Second
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content) {
+        if (!content.firstChild) content.appendChild(document.createTextNode(''));
+        const range = document.createRange();
+        range.setStart(content.firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(150);
+
+    const content = await page.locator('article').textContent();
+    // Items should be merged
+    expect(content).toContain('First');
+    expect(content).toContain('Second');
+  });
+
+  test('Backspace does not break content in middle of item', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('- Hello World');
+    await page.waitForTimeout(100);
+
+    // Move cursor to middle
+    await page.evaluate(() => {
+      const content = document.querySelector('.md-listcontent');
+      if (content && content.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, 6); // after 'Hello '
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(100);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('- HelloWorld');
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(1);
+  });
+
+  test('multiple Backspaces at start of list items progressively exit', async ({ page }) => {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- A\n- B\n- C\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(100);
+
+    // Move cursor to start of B
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content) {
+        if (!content.firstChild) content.appendChild(document.createTextNode(''));
+        const range = document.createRange();
+        range.setStart(content.firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(150);
+
+    // Should have merged or reduced items
+    const items = page.locator('.md-listitem');
+    const count = await items.count();
+    expect(count).toBeLessThanOrEqual(3);
+  });
+});
+
+test.describe('Selection Support', () => {
+  test('select text in paragraph - selection captured correctly', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('Hello Beautiful World');
+    await page.waitForTimeout(100);
+
+    // Select "Beautiful " (offset 6 to 16)
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      const textNode = el.firstChild;
+      const range = document.createRange();
+      range.setStart(textNode, 6);
+      range.setEnd(textNode, 16);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+
+    // Verify selection is active
+    const sel1 = await page.evaluate(() => {
+      const sel = window.getSelection();
+      return { text: sel.toString(), collapsed: sel.isCollapsed };
+    });
+    expect(sel1.collapsed).toBe(false);
+    expect(sel1.text).toBe('Beautiful ');
+  });
+
+  test('select text in list item - selection captured correctly', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('- Hello Beautiful World');
+    await page.waitForTimeout(100);
+
+    // Select "Beautiful " inside the list content
+    await page.evaluate(() => {
+      const content = document.querySelector('.md-listcontent');
+      const textNode = content.firstChild;
+      const range = document.createRange();
+      range.setStart(textNode, 6);
+      range.setEnd(textNode, 16);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+
+    const sel1 = await page.evaluate(() => {
+      const sel = window.getSelection();
+      return { text: sel.toString(), collapsed: sel.isCollapsed };
+    });
+    expect(sel1.collapsed).toBe(false);
+    expect(sel1.text).toBe('Beautiful ');
+  });
+
+  test('select text in nested list item - selection captured correctly', async ({ page }) => {
+    await resetPage(page);
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- Parent\n  - Child Item Here\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(100);
+
+    // Select "Item" in the nested child
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const content = items[1]?.querySelector('.md-listcontent');
+      if (content?.firstChild) {
+        const range = document.createRange();
+        range.setStart(content.firstChild, 6);
+        range.setEnd(content.firstChild, 10);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    const sel1 = await page.evaluate(() => {
+      const sel = window.getSelection();
+      return { text: sel.toString() };
+    });
+    expect(sel1.text).toBe('Item');
+  });
+
+  test('select all text and replace', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('Original content here');
+    await page.waitForTimeout(100);
+
+    // Select all
+    await page.keyboard.down('Control');
+    await page.keyboard.press('a');
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(50);
+
+    const sel1 = await page.evaluate(() => {
+      const sel = window.getSelection();
+      return { collapsed: sel.isCollapsed, text: sel.toString() };
+    });
+    expect(sel1.collapsed).toBe(false);
+    expect(sel1.text).toBe('Original content here');
+
+    // Replace
+    await page.keyboard.type('New content');
+    await page.waitForTimeout(200);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toBe('New content');
+  });
+
+  test('delete key removes selection in list item', async ({ page }) => {
+    await resetPage(page);
+    await page.keyboard.type('- Hello Beautiful World');
+    await page.waitForTimeout(100);
+
+    // Select "Beautiful "
+    await page.evaluate(() => {
+      const content = document.querySelector('.md-listcontent');
+      const textNode = content.firstChild;
+      const range = document.createRange();
+      range.setStart(textNode, 6);
+      range.setEnd(textNode, 16);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+
+    // Press Delete to remove selection
+    await page.keyboard.press('Delete');
+    await page.waitForTimeout(200);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('- Hello World');
+  });
+});

@@ -2786,11 +2786,21 @@
         // List operation just ran; browser may have misplaced cursor.
         // For text input, redirect to the correct list content span.
         if (event.inputType === 'insertText' && event.data) {
-          // Find the last list item and insert text there.
+          // Find the target list item using stable tracking (dk3.2 + dk3.3).
+          // Prefer data-cursor-target marker, then pendingCursor.listItemIndex,
+          // then fall back to last item.
           const items = element.querySelectorAll('.md-listitem')
-          if (items.length) {
-            const lastItem = items[items.length - 1]
-            const content = lastItem.querySelector('.md-listcontent')
+          let targetItem = element.querySelector('.md-listitem[data-cursor-target="true"]')
+          if (!targetItem && pendingCursor.listItemIndex !== undefined && items.length) {
+            targetItem = items[pendingCursor.listItemIndex]
+          }
+          if (!targetItem && items.length) {
+            targetItem = items[items.length - 1]
+          }
+          if (targetItem) {
+            // Clean up cursor target marker
+            targetItem.removeAttribute('data-cursor-target')
+            const content = targetItem.querySelector('.md-listcontent')
             if (content) {
               event.preventDefault()
               // Insert text at end of content span.
@@ -2810,6 +2820,9 @@
                    event.inputType === 'insertLineBreak') {
           event.preventDefault()
         }
+        // Clean up marker in non-text cases too
+        const markedItem = element.querySelector('.md-listitem[data-cursor-target="true"]')
+        if (markedItem) markedItem.removeAttribute('data-cursor-target')
         pendingCursor = null // clear after use
         return
       }
@@ -3056,9 +3069,15 @@
         // Browser moved cursor out of list content; re-place it.
         corrected = true
         document.removeEventListener('selectionchange', fixCursor)
-        const items = element.querySelectorAll('.md-listitem')
-        const targetItem = items[targetIndex]
+        // Use stable tracking: prefer marked item, then index from closure
+        let targetItem = element.querySelector('.md-listitem[data-cursor-target="true"]')
+        if (!targetItem) {
+          const items = element.querySelectorAll('.md-listitem')
+          targetItem = items[targetIndex]
+        }
         if (targetItem) {
+          // Clean up marker
+          targetItem.removeAttribute('data-cursor-target')
           const targetContent = targetItem.querySelector('.md-listcontent')
           if (targetContent) {
             if (!targetContent.firstChild) {
@@ -3076,6 +3095,9 @@
       // Also try immediate placement
       const targetItem = allItems[targetIndex]
       if (targetItem) {
+        // Mark target item for stable tracking across re-renders (dk3.3)
+        targetItem.setAttribute('data-cursor-target', 'true')
+
         const targetContent = targetItem.querySelector('.md-listcontent')
         if (targetContent) {
           if (!targetContent.firstChild) {
@@ -3089,7 +3111,8 @@
           s.addRange(r)
         }
       }
-      pendingCursor = { skip: true }
+      // Store target item index for stable tracking in beforeinput handler (dk3.2)
+      pendingCursor = { skip: true, listItemIndex: targetIndex }
       console.log('[ILP] set pendingCursor.skip, debounce cancelled')
       debounceHighlight.cancel()
       skipNextKeyup = true // prevent keyup from scheduling another debounce
@@ -3296,19 +3319,90 @@
       }
     }
 
-    // List-aware cursor capture and restore for debounce highlight.
+    // Unified cursor capture and restore for debounce highlight.
     // Unlike save()/restore() which capture DOM node references that go
     // stale after re-render, these use structured metadata that survives
     // a full re-render of the article.
     //
-    // Two cursor types:
-    //   { type: 'list', itemIndex, contentOffset } — inside a list item
-    //   { type: 'plain', offset } — in plain text (fallback)
+    // Three cursor types:
+    //   { type: 'list', itemIndex, contentOffset } — collapsed cursor in list item
+    //   { type: 'plain', offset } — collapsed cursor in plain text
+    //   { type: 'selection', context: 'list'|'plain', start, end } — range selection
     //
     // This avoids the fragility of absolute text offsets when markdown
     // markers (-, 1., indentation) are rendered in separate spans from
     // content. The list-aware path places cursor directly into the
     // target .md-listcontent span.
+
+    // Helper: compute text length from start of container to (node, offset)
+    function rangeTextLength(container, targetNode, targetOffset) {
+      if (targetNode === container) {
+        let offset = 0, i = 0
+        while (i < container.childNodes.length && i < targetOffset) {
+          if (container.childNodes[i].nodeType === Node.TEXT_NODE) {
+            offset += container.childNodes[i].textContent.length
+          }
+          i++
+        }
+        return offset
+      }
+      if (targetNode.nodeType === Node.TEXT_NODE) {
+        const r = document.createRange()
+        r.setStart(container, 0)
+        try { r.setEnd(targetNode, targetOffset) } catch (e) { return 0 }
+        return r.toString().length
+      }
+      return 0
+    }
+
+    // Helper: find DOM (node, offset) for a given text offset inside a container
+    function findNodeAtTextOffset(container, targetOffset) {
+      if (!container) return null
+      let current = 0
+      let targetNode = null
+      let targetOffsetLocal = 0
+
+      const visit = (parent) => {
+        for (const child of parent.childNodes) {
+          if (child.nodeType === Node.TEXT_NODE) {
+            const len = child.textContent.length
+            if (current === targetOffset && !targetNode) {
+              targetNode = child
+              targetOffsetLocal = 0
+              return 'stop'
+            }
+            if (current < targetOffset && current + len >= targetOffset) {
+              targetNode = child
+              targetOffsetLocal = targetOffset - current
+              return 'stop'
+            }
+            current += len
+          } else if (child.nodeType === Node.ELEMENT_NODE) {
+            const result = visit(child)
+            if (result === 'stop') return 'stop'
+          }
+        }
+      }
+      visit(container)
+
+      // Fallback: end of last text node
+      if (!targetNode) {
+        let lastText = null
+        const findLast = (parent) => {
+          for (const child of parent.childNodes) {
+            if (child.nodeType === Node.TEXT_NODE) lastText = child
+            else if (child.nodeType === Node.ELEMENT_NODE) findLast(child)
+          }
+        }
+        findLast(container)
+        if (lastText) {
+          targetNode = lastText
+          targetOffsetLocal = lastText.textContent.length
+        }
+      }
+
+      return targetNode ? { node: targetNode, offset: targetOffsetLocal } : null
+    }
 
     // Plain text offset helper — used in fallback paths where DOM is
     // not yet rendered (debounce gap) and we operate on textContent.
@@ -3324,6 +3418,61 @@
     function captureCursor() {
       const s = getSelection()
       if (!s || !s.rangeCount) return { type: 'plain', offset: 0 }
+
+      // Handle non-collapsed selections (dk3.6 + dk3.7)
+      if (!s.isCollapsed) {
+        const anchor = s.anchorNode
+        const focus = s.focusNode
+
+        // Check if both anchor and focus are in the same .md-listcontent
+        let anchorContentEl = null
+        let node = anchor
+        while (node && node !== element) {
+          if (node.nodeType === Node.ELEMENT_NODE && node.classList?.contains('md-listcontent')) {
+            anchorContentEl = node
+            break
+          }
+          node = node.parentElement
+        }
+
+        let focusContentEl = null
+        node = focus
+        while (node && node !== element) {
+          if (node.nodeType === Node.ELEMENT_NODE && node.classList?.contains('md-listcontent')) {
+            focusContentEl = node
+            break
+          }
+          node = node.parentElement
+        }
+
+        // Selection within a single list item
+        if (anchorContentEl && focusContentEl === anchorContentEl) {
+          const listItem = anchorContentEl.parentElement
+          const allItems = Array.from(element.querySelectorAll('.md-listitem'))
+          const itemIndex = allItems.indexOf(listItem)
+
+          const anchorOffset = rangeTextLength(anchorContentEl, anchor, s.anchorOffset)
+          const focusOffset = rangeTextLength(anchorContentEl, focus, s.focusOffset)
+
+          return {
+            type: 'selection',
+            context: 'list',
+            itemIndex: Math.max(0, itemIndex),
+            start: Math.min(anchorOffset, focusOffset),
+            end: Math.max(anchorOffset, focusOffset),
+          }
+        }
+
+        // Selection in plain text (or跨-list, fall back to plain)
+        const anchorOffset = rangeTextLength(element, anchor, s.anchorOffset)
+        const focusOffset = rangeTextLength(element, focus, s.focusOffset)
+        return {
+          type: 'selection',
+          context: 'plain',
+          start: Math.min(anchorOffset, focusOffset),
+          end: Math.max(anchorOffset, focusOffset),
+        }
+      }
 
       const anchor = s.anchorNode
       // Find the .md-listcontent if cursor is inside a list item.
@@ -3386,6 +3535,33 @@
 
       const s = getSelection()
       if (!s) return
+
+      // Restore selection (dk3.6 + dk3.7)
+      if (cursor.type === 'selection') {
+        const r = document.createRange()
+        const startInfo = findNodeAtTextOffset(
+          cursor.context === 'list'
+            ? (element.querySelectorAll('.md-listitem')[cursor.itemIndex]?.querySelector('.md-listcontent') || element)
+            : element,
+          cursor.start
+        )
+        const endInfo = findNodeAtTextOffset(
+          cursor.context === 'list'
+            ? (element.querySelectorAll('.md-listitem')[cursor.itemIndex]?.querySelector('.md-listcontent') || element)
+            : element,
+          cursor.end
+        )
+        if (startInfo && endInfo) {
+          r.setStart(startInfo.node, startInfo.offset)
+          r.setEnd(endInfo.node, endInfo.offset)
+          s.removeAllRanges()
+          s.addRange(r)
+          return
+        }
+        // Fallback: collapsed cursor at start
+        restorePlainCursor(cursor.start, s)
+        return
+      }
 
       if (cursor.type === 'list') {
         const items = element.querySelectorAll('.md-listitem')
