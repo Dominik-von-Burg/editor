@@ -323,4 +323,90 @@ test.describe('Multi-List Editing', () => {
     expect(markers.some(m => m.startsWith('1.'))).toBe(true);
     expect(markers.some(m => m.startsWith('2.'))).toBe(true);
   });
+
+  test('typing in second list does not jump cursor to first list', async ({ page }) => {
+    await resetPage(page);
+
+    // Set up two separate lists
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- First\n- Second\n\nSeparator\n\n- Third\n- Fourth\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(200);
+
+    // Move cursor to end of second list item ("Fourth")
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const fourthContent = items[3]?.querySelector('.md-listcontent');
+      if (fourthContent?.firstChild) {
+        const range = document.createRange();
+        range.setStart(fourthContent.firstChild, fourthContent.firstChild.textContent.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    // Type to trigger re-render
+    await page.keyboard.type('!');
+    await page.waitForTimeout(300);
+
+    // Cursor should still be in fourth item, not first list
+    const cursor = await getCursor(page);
+    expect(cursor.parentClass).toBe('md-listcontent');
+
+    // Verify the correct item is edited (fourth, not first)
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('Fourth!'); // Fourth was edited
+    expect(content).not.toContain('First!'); // First was NOT edited
+  });
+
+  test('Enter in second list creates item in correct list', async ({ page }) => {
+    await resetPage(page);
+
+    // Set up two separate lists
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- First\n- Second\n\nSeparator\n\n- Third\n- Fourth\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(200);
+
+    // Move cursor to end of last item in second list ("Fourth")
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const fourthContent = items[3]?.querySelector('.md-listcontent');
+      if (fourthContent?.firstChild) {
+        const range = document.createRange();
+        range.setStart(fourthContent.firstChild, fourthContent.firstChild.textContent.length);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(100);
+
+    // Press Enter to create new item in second list
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+
+    // Type new content
+    await page.keyboard.type('Fifth');
+    await page.waitForTimeout(200);
+
+    // Verify new item is in second list, not first
+    const items = await page.locator('.md-listitem').count();
+    expect(items).toBe(5);
+
+    const content = await page.locator('article').textContent();
+    expect(content).toContain('Fifth');
+    expect(content).toContain('First');
+    expect(content).toContain('Second');
+    expect(content).toContain('Third');
+    expect(content).toContain('Fourth');
+  });
 });
