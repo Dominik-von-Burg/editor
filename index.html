@@ -2964,24 +2964,20 @@
         : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
 
       if (listItem) {
-        // Remove the empty list item and place cursor after the previous item.
-        // If there's no previous item, insert a text node before this item.
+        // Remove the empty list item and insert a newline after the list
+        // so the cursor lands on a new line (breaking out of the list).
         const prevItem = listItem.previousElementSibling
         if (prevItem) {
           listItem.remove()
-          // Place cursor at end of previous item's content
-          const prevContent = prevItem.querySelector('.md-listcontent')
-          if (prevContent) {
-            const newRange = document.createRange()
-            if (prevContent.firstChild) {
-              newRange.setStart(prevContent.firstChild, prevContent.firstChild.textContent.length)
-            } else {
-              newRange.setStart(prevContent, 0)
-            }
-            newRange.collapse(true)
-            sel.removeAllRanges()
-            sel.addRange(newRange)
-          }
+          // Insert newline after the last list item
+          const textNode = document.createTextNode('\n')
+          element.insertBefore(textNode, prevItem.nextSibling)
+
+          const newRange = document.createRange()
+          newRange.setStart(textNode, 1)
+          newRange.collapse(true)
+          sel.removeAllRanges()
+          sel.addRange(newRange)
         } else {
           // No previous item - replace with a text node containing a newline
           const textNode = document.createTextNode('\n')

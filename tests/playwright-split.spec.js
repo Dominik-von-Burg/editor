@@ -324,4 +324,41 @@ test.describe('List split with real keyboard events', () => {
     const items = page.locator('.md-listitem');
     await expect(items).toHaveCount(1);
   });
+
+  test('double Enter exits list and cursor is on new line after list', async ({ page }) => {
+    await page.goto(`${BASE_URL}/index.html`);
+    
+    await page.click('article');
+    await page.waitForTimeout(100);
+    
+    await page.keyboard.type('- Item');
+    await page.waitForTimeout(100);
+    
+    // First Enter: creates new empty list item
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(50);
+    
+    // Second Enter: exits list
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    
+    // Type content after the list
+    await page.keyboard.type('After');
+    await page.waitForTimeout(100);
+    
+    // Verify "After" is NOT inside a list item
+    const textContent = await page.locator('article').textContent();
+    expect(textContent).toContain('Item');
+    expect(textContent).toContain('After');
+    
+    // The content "After" should not be inside any .md-listcontent
+    const listContentTexts = await page.locator('.md-listcontent').allTextContents();
+    for (const text of listContentTexts) {
+      expect(text).not.toContain('After');
+    }
+    
+    // Should have exactly 1 list item
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(1);
+  });
 });
