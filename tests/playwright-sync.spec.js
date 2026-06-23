@@ -143,6 +143,17 @@ async function getOtherDocId(page) {
   });
 }
 
+// Helper: get cursor info
+async function getCursorInfo(page) {
+  return page.evaluate(() => {
+    const sel = window.getSelection();
+    return {
+      offset: sel.anchorOffset,
+      nodeText: sel.anchorNode?.textContent || '',
+    };
+  });
+}
+
 test.describe('Folder Sync (Mock FSA)', () => {
   test('setup: folder links successfully', async ({ page }) => {
     await resetPage(page);
@@ -269,5 +280,138 @@ test.describe('Folder Sync (Mock FSA)', () => {
 
     const count = await mockFileCount(page);
     expect(count).toBe(0);
+  });
+
+  test('cursor preserved across explicit syncDoc', async ({ page }) => {
+    await resetPage(page);
+    await linkFolder(page);
+    await typeAndSync(page, '# Cursor Test\\n\\nLine one\\n\\nLine two');
+
+    // Place cursor in the middle of the content (after "Line one")
+    const beforeCursor = await page.evaluate(() => {
+      const editor = document.querySelector('article[contenteditable]');
+      const text = editor.textContent || '';
+      // Position cursor after "# Cursor Test\n\nLine one"
+      const targetPos = text.indexOf('Line one') + 'Line one'.length;
+      
+      const range = document.createRange();
+      let current = 0;
+      let found = false;
+      
+      const findAndPlace = (node) => {
+        if (found) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+          const len = node.textContent.length;
+          if (current + len >= targetPos) {
+            const offset = targetPos - current;
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            found = true;
+            return;
+          }
+          current += len;
+        } else {
+          for (const child of node.childNodes) {
+            findAndPlace(child);
+            if (found) return;
+          }
+        }
+      };
+      
+      findAndPlace(editor);
+      
+      const sel = window.getSelection();
+      return {
+        offset: sel.anchorOffset,
+        nodeText: sel.anchorNode?.textContent || '',
+      };
+    });
+
+    expect(beforeCursor.offset).toBeGreaterThan(0);
+    const beforeOffset = beforeCursor.offset;
+
+    // Now trigger a sync (idempotent - content doesn't change)
+    await page.evaluate(async () => {
+      const doc = docs[currentDocId];
+      await syncDoc(doc);
+    });
+    await page.waitForTimeout(300);
+
+    // Check cursor position after sync
+    const afterCursor = await getCursorInfo(page);
+
+    // Cursor should still be at the same position (allow 1-2 char tolerance due to DOM traversal)
+    expect(Math.abs(afterCursor.offset - beforeOffset)).toBeLessThan(3);
+  });
+
+  test('cursor preserved during external content sync (syncFromFolder)', async ({ page }) => {
+    await resetPage(page);
+    await linkFolder(page);
+    await typeAndSync(page, '# Content Test\\n\\nOriginal content here');
+
+    const filename = await mockFirstFile(page);
+
+    // Position cursor in editor (after "Original")
+    const beforeCursor = await page.evaluate(() => {
+      const editor = document.querySelector('article[contenteditable]');
+      const text = editor.textContent || '';
+      const targetPos = text.indexOf('Original') + 'Original'.length;
+      
+      const range = document.createRange();
+      let current = 0;
+      let found = false;
+      
+      const findAndPlace = (node) => {
+        if (found) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+          const len = node.textContent.length;
+          if (current + len >= targetPos) {
+            const offset = targetPos - current;
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            found = true;
+            return;
+          }
+          current += len;
+        } else {
+          for (const child of node.childNodes) {
+            findAndPlace(child);
+            if (found) return;
+          }
+        }
+      };
+      
+      findAndPlace(editor);
+      
+      const sel = window.getSelection();
+      return {
+        offset: sel.anchorOffset,
+        nodeText: sel.anchorNode?.textContent || '',
+      };
+    });
+
+    expect(beforeCursor.offset).toBeGreaterThan(0);
+    const beforeOffset = beforeCursor.offset;
+
+    // Simulate external edit (same content - idempotent sync)
+    await mockWriteFile(page, filename, '# Content Test\\n\\nOriginal content here');
+
+    // Trigger syncFromFolder
+    await page.evaluate(async () => {
+      await syncFromFolder(true);
+    });
+    await page.waitForTimeout(500);
+
+    // Check cursor position after sync
+    const afterCursor = await getCursorInfo(page);
+
+    // Cursor should be preserved (allow small tolerance)
+    expect(Math.abs(afterCursor.offset - beforeOffset)).toBeLessThan(3);
   });
 });
