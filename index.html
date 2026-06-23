@@ -2097,7 +2097,7 @@
 
             const markerSpan = document.createElement('span')
             markerSpan.className = 'md-listmarker'
-            markerSpan.textContent = marker + spacing
+            markerSpan.textContent = marker + (spacing || ' ')
 
             const contentSpan = document.createElement('span')
             contentSpan.className = 'md-listcontent'

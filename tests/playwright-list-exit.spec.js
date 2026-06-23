@@ -352,4 +352,48 @@ test.describe('List Exit Cursor Behavior', () => {
     const uniqueMarkers = [...new Set(markers)];
     expect(uniqueMarkers.length).toBe(1);
   });
+
+  test('ordered list markers always have space, even when typed without', async ({ page }) => {
+    await resetPage(page);
+
+    // Type "1.item1" (no space after period), then Enter
+    await page.keyboard.type('1.item1');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('item2');
+    await page.waitForTimeout(200);
+
+    const markers = await page.evaluate(() => {
+      const markerSpans = document.querySelectorAll('.md-listmarker');
+      return Array.from(markerSpans).map(span => span.textContent);
+    });
+
+    console.log('Ordered markers (no space after period):', JSON.stringify(markers));
+
+    expect(markers[0]).toBe('1. ');
+    expect(markers[1]).toBe('2. ');
+  });
+
+  test('ordered list markers with space stay consistent', async ({ page }) => {
+    await resetPage(page);
+
+    // Type "1. item1" (with space after period), then Enter
+    await page.keyboard.type('1. item1');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('item2');
+    await page.waitForTimeout(200);
+
+    const markers = await page.evaluate(() => {
+      const markerSpans = document.querySelectorAll('.md-listmarker');
+      return Array.from(markerSpans).map(span => span.textContent);
+    });
+
+    console.log('Ordered markers (with space):', JSON.stringify(markers));
+
+    expect(markers[0]).toBe('1. ');
+    expect(markers[1]).toBe('2. ');
+  });
 });
