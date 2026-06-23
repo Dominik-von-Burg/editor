@@ -2785,10 +2785,9 @@
       if (pendingCursor && pendingCursor.skip) {
         // List operation just ran; browser may have misplaced cursor.
         // For text input, redirect to the correct list content span.
+        // But only if cursor is still in the expected vicinity.
+        // If the user/program moved to a different list, let normal input proceed.
         if (event.inputType === 'insertText' && event.data) {
-          // Find the target list item using stable tracking (dk3.2 + dk3.3).
-          // Prefer data-cursor-target marker, then pendingCursor.listItemIndex,
-          // then fall back to last item.
           const items = element.querySelectorAll('.md-listitem')
           let targetItem = element.querySelector('.md-listitem[data-cursor-target="true"]')
           if (!targetItem && pendingCursor.listItemIndex !== undefined && items.length) {
@@ -2798,22 +2797,46 @@
             targetItem = items[items.length - 1]
           }
           if (targetItem) {
-            // Clean up cursor target marker
-            targetItem.removeAttribute('data-cursor-target')
-            const content = targetItem.querySelector('.md-listcontent')
-            if (content) {
-              event.preventDefault()
-              // Insert text at end of content span.
-              const doc = content.ownerDocument
-              const inserted = doc.createTextNode(event.data)
-              content.appendChild(inserted)
-              // Place cursor after inserted text.
-              const r = document.createRange()
-              r.setStart(inserted, event.data.length)
-              r.collapse(true)
-              const s = getSelection()
-              s.removeAllRanges()
-              s.addRange(r)
+            // Check if cursor is already in a different list content span.
+            // If so, the user moved intentionally — don't redirect.
+            const sel = getSelection()
+            let currentContent = null
+            if (sel?.anchorNode) {
+              let n = sel.anchorNode
+              while (n && n !== element) {
+                if (n.nodeType === Node.ELEMENT_NODE && n.classList?.contains('md-listcontent')) {
+                  currentContent = n
+                  break
+                }
+                n = n.parentElement
+              }
+            }
+            const targetContent = targetItem?.querySelector('.md-listcontent')
+            const cursorMovedAway = currentContent && targetContent && currentContent !== targetContent
+
+            if (!cursorMovedAway) {
+              // Clean up cursor target marker
+              targetItem.removeAttribute('data-cursor-target')
+              const content = targetContent || targetItem.querySelector('.md-listcontent')
+              if (content) {
+                event.preventDefault()
+                // Insert text at end of content span.
+                const doc = content.ownerDocument
+                const inserted = doc.createTextNode(event.data)
+                content.appendChild(inserted)
+                // Place cursor after inserted text.
+                const r = document.createRange()
+                r.setStart(inserted, event.data.length)
+                r.collapse(true)
+                const s = getSelection()
+                s.removeAllRanges()
+                s.addRange(r)
+              }
+            } else {
+              // Cursor moved to a different list — clear pending and let normal input proceed
+              targetItem.removeAttribute('data-cursor-target')
+              pendingCursor = null
+              return
             }
           }
         } else if (event.inputType === 'insertParagraph' ||
