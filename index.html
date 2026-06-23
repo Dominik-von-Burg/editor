@@ -2706,7 +2706,7 @@
         }
         if (action?.prefix) {
           preventDefault(event)
-          insertListPrefix(action.prefix)
+          insertListPrefix(action.prefix, action.itemIndex)
           return
         }
       }
@@ -2898,57 +2898,37 @@
 
     function nextListAction() {
       const pos = save()
-      // Walk the DOM to find the list item containing the cursor.
-      // This is more robust than parsing textContent, which loses
-      // newlines and transforms '-' into '•' after parseMarkdown.
-      const sel = getSelection()
-      if (!sel || !sel.rangeCount) return null
-      const anchor = sel.anchorNode
-      const listItem = (anchor.nodeType === 1)
-        ? anchor.closest('.md-listitem')
-        : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
+      const raw = element.textContent
+      const offset = getPlainOffset()
+      const before = raw.slice(0, offset)
+      const lineStart = before.lastIndexOf('\n') + 1
+      const line = before.slice(lineStart)
 
-      let marker, content, indent
-      if (listItem) {
-        const markerSpan = listItem.querySelector('.md-listmarker')
-        const contentSpan = listItem.querySelector('.md-listcontent')
-        const indentSpan = listItem.querySelector('.md-listindent')
-        if (!markerSpan || !contentSpan) return null
+      const m = line.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)([\s\S]*)$/)
+      if (!m) return null
+      const marker = m[2] + ' '
+      const content = m[4] || ''
+      const indent = m[1]
 
-        marker = markerSpan.textContent
-        content = contentSpan.textContent || ''
-        indent = indentSpan ? indentSpan.textContent : ''
-      } else {
-        // Fallback: parse raw textContent when DOM hasn't rendered yet
-        // (debounce gap). This ensures rapid Enter still continues lists.
-        const raw = element.textContent
-        const offset = getPlainOffset()
-        // Find the line containing the cursor
-        const before = raw.slice(0, offset)
-        const lineStart = before.lastIndexOf('\n') + 1
-        const line = raw.slice(lineStart, offset)
-
-        const m = line.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)([\s\S]*)$/)
-        if (!m) return null
-        marker = m[2] + ' '
-        content = m[4] || ''
-        indent = m[1]
+      const markerTrim = marker.trim()
+      const markerMatch = /^([ \t]{0,8})(-|\d+[.)])([ \t]*)/.exec(before)
+      let itemIndex = 0
+      if (markerMatch) {
+        const prefix = markerMatch[0]
+        itemIndex = (before.match(/(^|\n)([ \t]{0,8})(-|\d+[.)])([ \t]*)/g) || []).length - 1
       }
 
-      // Unordered list: marker is '-' or '•' (may include trailing space)
-      const markerTrim = marker.trim()
       if (markerTrim === '-' || markerTrim === '•') {
         if (!content.trim()) return {exit: true}
-        return {prefix: `${indent}- `}
+        return {prefix: `${indent}- `, itemIndex}
       }
 
-      // Ordered list: marker is '1.', '2)', etc. (may include trailing space)
       const orderedMatch = markerTrim.match(/^(\d+)([.)])$/)
       if (orderedMatch) {
         if (!content.trim()) return {exit: true}
         const num = Number(orderedMatch[1]) + 1
         const sep = orderedMatch[2]
-        return {prefix: `${indent}${num}${sep} `}
+        return {prefix: `${indent}${num}${sep} `, itemIndex}
       }
 
       return null
@@ -3013,116 +2993,55 @@
       skipNextKeyup = true
     }
 
-    function insertListPrefix(prefix) {
-      console.log('[ILP] called with prefix=' + JSON.stringify(prefix))
+    function insertListPrefix(prefix, itemIndex) {
       skipNextInput = true
       const sel = getSelection()
       if (!sel || !sel.rangeCount) return
-      const anchor = sel.anchorNode
-      const listItem = (anchor.nodeType === 1)
-        ? anchor.closest('.md-listitem')
-        : (anchor.parentElement && anchor.parentElement.closest('.md-listitem'))
 
-      let fullContent, marker, textBefore, textAfter, itemIndex
-      let contentBefore, contentAfter
-      if (listItem) {
-        // Capture item index BEFORE DOM replacement so we can find
-        // the correct target item after highlight() rerenders.
-        const itemsBefore = Array.from(element.querySelectorAll('.md-listitem'))
-        itemIndex = itemsBefore.indexOf(listItem)
-        const contentSpan = listItem.querySelector('.md-listcontent')
-        const markerSpan = listItem.querySelector('.md-listmarker')
-        fullContent = contentSpan ? (contentSpan.textContent || '') : ''
-        marker = markerSpan ? markerSpan.textContent : ''
-        const markerMatch = marker.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)$/)
-        const existingIndent = markerMatch ? markerMatch[1] : ''
-        const existingSpacing = markerMatch ? markerMatch[3] : ' '
-        const markerType = markerMatch ? markerMatch[2] : '-'
-        const isOrdered = /^\d+[.)]$/.test(markerType)
-        const normalizedPrefix = isOrdered
-          ? prefix
-          : existingIndent + markerType + existingSpacing
-        let cursorOffset = fullContent.length // default: end of content
-        const range = sel.getRangeAt(0)
-        const preRange = document.createRange()
-        preRange.selectNodeContents(contentSpan)
-        preRange.setEnd(range.startContainer, range.startOffset)
-        cursorOffset = preRange.toString().length
+      const raw = element.textContent
+      const range = sel.getRangeAt(0)
 
-        contentBefore = fullContent.slice(0, cursorOffset)
-        contentAfter = fullContent.slice(cursorOffset)
-
-        const r = document.createRange()
-        r.setStart(element, 0)
-        r.setEndBefore(listItem)
-        textBefore = r.toString()
-
-        r.setStartAfter(listItem)
-        r.setEndAfter(element.lastChild)
-        textAfter = r.toString()
-
-        const newRaw = textBefore + marker + contentBefore + '\n' + normalizedPrefix + contentAfter + textAfter
-        element.textContent = newRaw
+      let textBefore, textAfter, marker, contentBefore, contentAfter
+      if (range.startContainer === element || !element.contains(range.startContainer)) {
+        textBefore = raw
+        textAfter = ''
+        marker = ''
+        contentBefore = ''
+        contentAfter = ''
       } else {
-        itemIndex = -1 // fallback path, no item tracking
-        // Fallback: raw text mode (debounce gap, DOM not rendered yet).
-        // Insert newline + prefix at cursor position.
-        const raw = element.textContent
-        const offset = getPlainOffset()
-        contentBefore = raw.slice(0, offset)
-        contentAfter = raw.slice(offset)
-        element.textContent = contentBefore + '\n' + prefix + contentAfter
+        const preRange = document.createRange()
+        preRange.setStart(element, 0)
+        preRange.setEnd(range.startContainer, range.startOffset)
+        const beforeRange = preRange.toString()
+        const afterRange = raw.slice(beforeRange.length)
+
+        const lineStart = beforeRange.lastIndexOf('\n') + 1
+        const lineEnd = beforeRange.slice(lineStart).includes('\n')
+          ? lineStart + beforeRange.slice(lineStart).indexOf('\n')
+          : beforeRange.length
+        const line = beforeRange.slice(lineStart, lineEnd)
+
+        textBefore = raw.slice(0, lineEnd)
+        textAfter = raw.slice(lineEnd)
+
+        const m = line.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)(.*)$/)
+        if (m) {
+          marker = m[2] + m[3]
+          contentBefore = m[4] || ''
+        } else {
+          marker = ''
+          contentBefore = ''
+        }
+        contentAfter = afterRange
       }
+
+      element.textContent = textBefore + '\n' + prefix + contentAfter + textAfter
       highlight(element)
+
       const allItems = element.querySelectorAll('.md-listitem')
-      const targetIndex = contentAfter !== undefined && contentAfter !== ''
-        ? itemIndex + 1
-        : allItems.length - 1
-      // In plaintext-only mode, the browser may override cursor placement
-      // after keydown processing. Use a selectionchange listener to catch
-      // the browser's repositioning and correct it.
-      let corrected = false
-      const fixCursor = () => {
-        if (corrected) { document.removeEventListener('selectionchange', fixCursor); return }
-        const sel = getSelection()
-        if (!sel.isCollapsed) { document.removeEventListener('selectionchange', fixCursor); return }
-        const parent = sel.anchorNode?.parentElement
-        if (parent && parent.classList.contains('md-listcontent')) {
-          document.removeEventListener('selectionchange', fixCursor)
-          return
-        }
-        // Browser moved cursor out of list content; re-place it.
-        corrected = true
-        document.removeEventListener('selectionchange', fixCursor)
-        // Use stable tracking: prefer marked item, then index from closure
-        let targetItem = element.querySelector('.md-listitem[data-cursor-target="true"]')
-        if (!targetItem) {
-          const items = element.querySelectorAll('.md-listitem')
-          targetItem = items[targetIndex]
-        }
-        if (targetItem) {
-          // Clean up marker
-          targetItem.removeAttribute('data-cursor-target')
-          const targetContent = targetItem.querySelector('.md-listcontent')
-          if (targetContent) {
-            if (!targetContent.firstChild) {
-              targetContent.appendChild(document.createTextNode(''))
-            }
-            const r = document.createRange()
-            r.setStart(targetContent.firstChild, 0)
-            r.collapse(true)
-            sel.removeAllRanges()
-            sel.addRange(r)
-          }
-        }
-      }
-      document.addEventListener('selectionchange', fixCursor)
-      // Also try immediate placement
+      const targetIndex = itemIndex + 1
       const targetItem = allItems[targetIndex]
       if (targetItem) {
-        // Mark target item for stable tracking across re-renders (dk3.3)
-        targetItem.setAttribute('data-cursor-target', 'true')
-
         const targetContent = targetItem.querySelector('.md-listcontent')
         if (targetContent) {
           if (!targetContent.firstChild) {
@@ -3131,16 +3050,13 @@
           const r = document.createRange()
           r.setStart(targetContent.firstChild, 0)
           r.collapse(true)
-          const s = getSelection()
-          s.removeAllRanges()
-          s.addRange(r)
+          sel.removeAllRanges()
+          sel.addRange(r)
         }
       }
-      // Store target item index for stable tracking in beforeinput handler (dk3.2)
       pendingCursor = { skip: true, listItemIndex: targetIndex }
-      console.log('[ILP] set pendingCursor.skip, debounce cancelled')
       debounceHighlight.cancel()
-      skipNextKeyup = true // prevent keyup from scheduling another debounce
+      skipNextKeyup = true
     }
 
     function insertText(text) {

@@ -2304,6 +2304,27 @@ test.describe('Middle-of-List Editing', () => {
     expect(cursor.offset).toBe(0);
   });
 
+  test('split at end of middle item then type: text goes into new item', async ({ page }) => {
+    await setupThreeItemList(page, 1, 1); // cursor at end of 'B'
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+
+    // Type into the new empty item
+    await page.keyboard.type('New');
+    await page.waitForTimeout(150);
+
+    // Verify we have 4 items total
+    const items = page.locator('.md-listitem');
+    await expect(items).toHaveCount(4);
+
+    // Verify item contents: A, B, New, C
+    const contents = await page.locator('.md-listcontent').allTextContents();
+    expect(contents[0]).toBe('A');
+    expect(contents[1]).toBe('B');
+    expect(contents[2]).toBe('New');
+    expect(contents[3]).toBe('C');
+  });
+
   test('multiple splits in same list maintain correct cursor', async ({ page }) => {
     await resetPage(page);
     await page.evaluate(() => {
