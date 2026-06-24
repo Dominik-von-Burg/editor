@@ -2908,14 +2908,19 @@
       const raw = element.textContent
       const offset = getPlainOffset()
       const before = raw.slice(0, offset)
+      const after = raw.slice(offset)
       const lineStart = before.lastIndexOf('\n') + 1
-      const line = before.slice(lineStart)
+      let line = before.slice(lineStart)
 
       const m = line.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)([\s\S]*)$/)
       if (!m) return null
       const marker = m[2] + ' '
-      const content = m[4] || ''
+      let content = m[4] || ''
       const indent = m[1]
+
+      if (!content.trim() && line.match(/^([ \t]{0,8})(-|\d+[.)])([ \t]*)$/)) {
+        content = after.split('\n')[0]
+      }
 
       const markerTrim = marker.trim()
       const markerMatch = /^([ \t]{0,8})(-|\d+[.)])([ \t]*)/.exec(before)

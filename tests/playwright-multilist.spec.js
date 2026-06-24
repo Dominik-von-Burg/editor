@@ -409,4 +409,99 @@ test.describe('Multi-List Editing', () => {
     expect(content).toContain('Third');
     expect(content).toContain('Fourth');
   });
+
+  test('Enter at start of second list item should continue list, not exit', async ({ page }) => {
+    const logs = [];
+    page.on('console', msg => {
+      console.log('Browser log:', msg.text());
+      logs.push(msg.text());
+    });
+    await resetPage(page);
+
+    // Set up two separate lists
+    await page.evaluate(() => {
+      const el = document.querySelector('article');
+      el.textContent = '- First\n- Second\n\nSeparator\n\n- Third\n- Fourth\n';
+      parseMarkdown(el);
+    });
+    await page.waitForTimeout(200);
+
+    // Place cursor at the start of the last item in second list ("Fourth")
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.md-listitem');
+      const fourthContent = items[3]?.querySelector('.md-listcontent');
+      if (fourthContent?.firstChild) {
+        const range = document.createRange();
+        range.setStart(fourthContent.firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+    await page.waitForTimeout(50);
+
+    // Press Enter at start of item - should create new item in same list
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+
+    // Check state after Enter - show full raw text
+    const afterEnterContent = await page.evaluate(() => document.querySelector('article').textContent);
+    console.log('After Enter content:', JSON.stringify(afterEnterContent));
+
+    // There should be 5 items total (not 4 - we should have added a new one)
+    const items = await page.locator('.md-listitem').count();
+    console.log('Items count:', items);
+    expect(items).toBe(5);
+  });
+
+  test('adding item to second list via keyboard does not affect first list', async ({ page }) => {
+    await resetPage(page);
+
+    // Create first list
+    await page.keyboard.type('- Item1');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Item2');
+    await page.waitForTimeout(100);
+
+    // Exit first list
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+
+    // Create second list
+    await page.keyboard.type('- A');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    await page.keyboard.type('B');
+    await page.waitForTimeout(200);
+
+    // Now add a third item to the second list
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(200);
+
+    // Type into the new item
+    await page.keyboard.type('C');
+    await page.waitForTimeout(300);
+
+    // Verify cursor is in the correct item (C, not in Item1 or Item2)
+    const cursor = await getCursor(page);
+    console.log('Cursor:', cursor);
+
+    const content = await page.locator('article').textContent();
+    console.log('Content:', content);
+
+    // Check the content of all items
+    const listItems = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('.md-listcontent')).map(el => el.textContent);
+    });
+    console.log('List items:', listItems);
+
+    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(listItems).toContain('C');
+  });
 });
