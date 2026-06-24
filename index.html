@@ -313,7 +313,7 @@
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: transparent;
     z-index: 100;
     place-items: center;
   }
@@ -327,7 +327,9 @@
     max-height: 80vh;
     display: flex;
     flex-direction: column;
-    background: var(--elevated);
+    background: var(--glass);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
     border-radius: 14px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     overflow: hidden;
