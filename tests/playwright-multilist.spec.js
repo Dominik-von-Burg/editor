@@ -1,28 +1,9 @@
 import { test, expect } from '@playwright/test';
-
-const BASE_URL = 'http://localhost:8901';
-
-async function resetPage(page) {
-  await page.goto(`${BASE_URL}/index.html?_t=${Date.now()}`);
-  await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(300);
-  await page.click('article');
-  await page.waitForTimeout(100);
-}
-
-async function getCursor(page) {
-  return page.evaluate(() => {
-    const sel = window.getSelection();
-    if (!sel.rangeCount) return { parentTag: 'NONE', parentClass: '', offset: 0 };
-    const node = sel.anchorNode;
-    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-    return {
-      parentTag: el.tagName,
-      parentClass: el.className || '',
-      offset: sel.anchorOffset,
-    };
-  });
-}
+import {
+  resetPage, getCursor, countListItems, getListContents,
+  placeCursorInListItem, placeCursorAtEndOfListItem,
+  findListItems,
+} from './test-helpers';
 
 // Helper: exit list and create separator paragraph
 async function exitList(page) {
@@ -36,6 +17,33 @@ async function exitList(page) {
   await page.waitForTimeout(50);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(100);
+}
+
+// Helper: place cursor at end of list item content by text
+async function placeCursorInListItemByContent(page, searchText) {
+  await page.evaluate((text) => {
+    const art = document.querySelector('article');
+    // Walk text nodes to find the search text
+    const walker = document.createTreeWalker(art, NodeFilter.SHOW_TEXT);
+    let node = walker.currentNode;
+    while (node) {
+      const nodeText = node.nodeValue || '';
+      const idx = nodeText.indexOf(text);
+      if (idx !== -1) {
+        // Found it — place cursor at end of matched text
+        const offset = Math.min(idx + text.length, node.length);
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      node = walker.nextNode();
+    }
+  }, searchText);
+  await page.waitForTimeout(50);
 }
 
 test.describe('Multi-List Editing', () => {
@@ -56,22 +64,13 @@ test.describe('Multi-List Editing', () => {
     // Create second list
     await page.keyboard.type('- Cat');
     await page.waitForTimeout(50);
+
+    // Verify cursor is on a list item
     const c1 = await getCursor(page);
-    expect(c1.parentClass).toContain('md-listcontent');
+    expect(c1.onListItem).toBe(true);
 
     // Move cursor back to first list and type
-    await page.evaluate(() => {
-      const items = document.querySelectorAll('.md-listitem');
-      const firstContent = items[0]?.querySelector('.md-listcontent');
-      if (firstContent?.firstChild) {
-        const range = document.createRange();
-        range.setStart(firstContent.firstChild, firstContent.firstChild.textContent.length);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    });
+    await placeCursorInListItemByContent(page, 'Apple');
     await page.waitForTimeout(50);
 
     await page.keyboard.type(' (red)');
@@ -102,13 +101,13 @@ test.describe('Multi-List Editing', () => {
 
     // Verify cursor is in second list
     const c1 = await getCursor(page);
-    expect(c1.parentClass).toContain('md-listcontent');
+    expect(c1.onListItem).toBe(true);
 
     // Move up (should go to "Between" paragraph)
     await page.keyboard.press('ArrowUp');
     await page.waitForTimeout(100);
     const c2 = await getCursor(page);
-    expect(c2.parentTag).toMatch(/ARTICLE|SPAN/);
+    expect(c2.onListItem).toBe(false);
   });
 
   test('type into first list when second list exists', async ({ page }) => {
@@ -123,22 +122,10 @@ test.describe('Multi-List Editing', () => {
     await page.waitForTimeout(200);
 
     // Verify setup
-    const items = await page.locator('.md-listitem').count();
-    expect(items).toBe(4);
+    expect(await countListItems(page)).toBe(4);
 
     // Move cursor to first list item and type
-    await page.evaluate(() => {
-      const items = document.querySelectorAll('.md-listitem');
-      const firstContent = items[0]?.querySelector('.md-listcontent');
-      if (firstContent?.firstChild) {
-        const range = document.createRange();
-        range.setStart(firstContent.firstChild, firstContent.firstChild.textContent.length);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    });
+    await placeCursorInListItemByContent(page, 'One');
     await page.waitForTimeout(50);
 
     await page.keyboard.type(' (edited)');
@@ -159,17 +146,7 @@ test.describe('Multi-List Editing', () => {
     await page.waitForTimeout(50);
 
     // Position cursor mid-content
-    await page.evaluate(() => {
-      const content = document.querySelector('.md-listcontent');
-      if (content?.firstChild) {
-        const range = document.createRange();
-        range.setStart(content.firstChild, 6);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    });
+    await placeCursorInListItem(page, 0, 6);
     await page.waitForTimeout(50);
 
     // Split with Enter
@@ -184,8 +161,7 @@ test.describe('Multi-List Editing', () => {
     await page.waitForTimeout(50);
 
     // Verify both lists exist
-    const items = await page.locator('.md-listitem').count();
-    expect(items).toBeGreaterThanOrEqual(3);
+    expect(await countListItems(page)).toBeGreaterThanOrEqual(3);
 
     const content = await page.locator('article').textContent();
     expect(content).toContain('Hello');
@@ -222,8 +198,7 @@ test.describe('Multi-List Editing', () => {
     expect(content).toContain('X');
     expect(content).toContain('Y');
 
-    const items = await page.locator('.md-listitem').count();
-    expect(items).toBe(4);
+    expect(await countListItems(page)).toBe(4);
   });
 
   test('ordered list in first, unordered in second', async ({ page }) => {
@@ -250,8 +225,7 @@ test.describe('Multi-List Editing', () => {
     expect(content).toContain('Second');
     expect(content).toContain('Bullet');
 
-    const items = await page.locator('.md-listitem').count();
-    expect(items).toBe(3);
+    expect(await countListItems(page)).toBe(3);
   });
 
   test('edit item in first list when second list exists', async ({ page }) => {
@@ -266,22 +240,10 @@ test.describe('Multi-List Editing', () => {
     await page.waitForTimeout(200);
 
     // Verify setup
-    const items = await page.locator('.md-listitem').count();
-    expect(items).toBe(4);
+    expect(await countListItems(page)).toBe(4);
 
     // Move cursor to second item of first list and type
-    await page.evaluate(() => {
-      const items = document.querySelectorAll('.md-listitem');
-      const secondContent = items[1]?.querySelector('.md-listcontent');
-      if (secondContent?.firstChild) {
-        const range = document.createRange();
-        range.setStart(secondContent.firstChild, secondContent.firstChild.textContent.length);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    });
+    await placeCursorInListItemByContent(page, 'Beta');
     await page.waitForTimeout(50);
 
     await page.keyboard.type(' (updated)');
@@ -319,9 +281,15 @@ test.describe('Multi-List Editing', () => {
     expect(content).toContain('Bullet');
 
     // Check for list markers
-    const markers = await page.locator('.md-listmarker').allTextContents();
-    expect(markers.some(m => m.startsWith('1.'))).toBe(true);
-    expect(markers.some(m => m.startsWith('2.'))).toBe(true);
+    const markers = await page.evaluate(() => {
+      const items = window.__findListItems();
+      return items.map(item => {
+        const m = item.text.match(/^[ \t]*(-|\d+[.)]) */);
+        return m ? m[1] : '';
+      });
+    });
+    expect(markers.some(m => m === '1.')).toBe(true);
+    expect(markers.some(m => m === '2.')).toBe(true);
   });
 
   test('typing in second list does not jump cursor to first list', async ({ page }) => {
@@ -336,18 +304,7 @@ test.describe('Multi-List Editing', () => {
     await page.waitForTimeout(200);
 
     // Move cursor to end of second list item ("Fourth")
-    await page.evaluate(() => {
-      const items = document.querySelectorAll('.md-listitem');
-      const fourthContent = items[3]?.querySelector('.md-listcontent');
-      if (fourthContent?.firstChild) {
-        const range = document.createRange();
-        range.setStart(fourthContent.firstChild, fourthContent.firstChild.textContent.length);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    });
+    await placeCursorInListItemByContent(page, 'Fourth');
     await page.waitForTimeout(50);
 
     // Type to trigger re-render
@@ -356,7 +313,7 @@ test.describe('Multi-List Editing', () => {
 
     // Cursor should still be in fourth item, not first list
     const cursor = await getCursor(page);
-    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.onListItem).toBe(true);
 
     // Verify the correct item is edited (fourth, not first)
     const content = await page.locator('article').textContent();
@@ -376,18 +333,7 @@ test.describe('Multi-List Editing', () => {
     await page.waitForTimeout(200);
 
     // Move cursor to end of last item in second list ("Fourth")
-    await page.evaluate(() => {
-      const items = document.querySelectorAll('.md-listitem');
-      const fourthContent = items[3]?.querySelector('.md-listcontent');
-      if (fourthContent?.firstChild) {
-        const range = document.createRange();
-        range.setStart(fourthContent.firstChild, fourthContent.firstChild.textContent.length);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    });
+    await placeCursorInListItemByContent(page, 'Fourth');
     await page.waitForTimeout(100);
 
     // Press Enter to create new item in second list
@@ -399,8 +345,7 @@ test.describe('Multi-List Editing', () => {
     await page.waitForTimeout(200);
 
     // Verify new item is in second list, not first
-    const items = await page.locator('.md-listitem').count();
-    expect(items).toBe(5);
+    expect(await countListItems(page)).toBe(5);
 
     const content = await page.locator('article').textContent();
     expect(content).toContain('Fifth');
@@ -411,11 +356,6 @@ test.describe('Multi-List Editing', () => {
   });
 
   test('Enter at start of second list item should continue list, not exit', async ({ page }) => {
-    const logs = [];
-    page.on('console', msg => {
-      console.log('Browser log:', msg.text());
-      logs.push(msg.text());
-    });
     await resetPage(page);
 
     // Set up two separate lists
@@ -428,15 +368,30 @@ test.describe('Multi-List Editing', () => {
 
     // Place cursor at the start of the last item in second list ("Fourth")
     await page.evaluate(() => {
-      const items = document.querySelectorAll('.md-listitem');
-      const fourthContent = items[3]?.querySelector('.md-listcontent');
-      if (fourthContent?.firstChild) {
-        const range = document.createRange();
-        range.setStart(fourthContent.firstChild, 0);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+      const items = window.__findListItems();
+      const fourth = items[3]; // First=0, Second=1, Third=2, Fourth=3
+      if (!fourth) return;
+      const m = fourth.text.match(/^[ \t]*(?:-|\d+[.)]) */);
+      const offset = fourth.start + (m ? m[0].length : 0);
+      const art = document.querySelector('article');
+
+      // Traverse text nodes to find the correct position
+      let charIndex = 0;
+      const walker = document.createTreeWalker(art, NodeFilter.SHOW_TEXT);
+      let node = walker.currentNode;
+      while (node) {
+        const nodeLen = (node.nodeValue || '').length;
+        if (charIndex + nodeLen >= offset) {
+          const range = document.createRange();
+          range.setStart(node, Math.min(offset - charIndex, node.length));
+          range.collapse(true);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+        charIndex += nodeLen;
+        node = walker.nextNode();
       }
     });
     await page.waitForTimeout(50);
@@ -445,12 +400,12 @@ test.describe('Multi-List Editing', () => {
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);
 
-    // Check state after Enter - show full raw text
+    // Check state after Enter
     const afterEnterContent = await page.evaluate(() => document.querySelector('article').textContent);
     console.log('After Enter content:', JSON.stringify(afterEnterContent));
 
     // There should be 5 items total (not 4 - we should have added a new one)
-    const items = await page.locator('.md-listitem').count();
+    const items = await countListItems(page);
     console.log('Items count:', items);
     expect(items).toBe(5);
   });
@@ -488,7 +443,7 @@ test.describe('Multi-List Editing', () => {
     await page.keyboard.type('C');
     await page.waitForTimeout(300);
 
-    // Verify cursor is in the correct item (C, not in Item1 or Item2)
+    // Verify cursor is on a list item
     const cursor = await getCursor(page);
     console.log('Cursor:', cursor);
 
@@ -497,11 +452,14 @@ test.describe('Multi-List Editing', () => {
 
     // Check the content of all items
     const listItems = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('.md-listcontent')).map(el => el.textContent);
+      return window.__findListItems().map(item => {
+        const m = item.text.match(/^[ \t]*(?:-|\d+[.)]) */);
+        return m ? item.text.slice(m[0].length).replace(/\n$/, '') : item.text.replace(/\n$/, '');
+      });
     });
     console.log('List items:', listItems);
 
-    expect(cursor.parentClass).toBe('md-listcontent');
+    expect(cursor.onListItem).toBe(true);
     expect(listItems).toContain('C');
   });
 });
