@@ -28,5 +28,5 @@ For folder sync, use Chrome/Edge on `http://localhost` or `https://` (the File S
 ## Project
 
 - **Issues**: tracked with [beads](https://github.com/Dominik-von-Burg/beads) (`bd` CLI)
-- **Tests**: E2E via [`agent-browser`](tests/) — 42 editor tests + 7 folder-sync tests
+- **Tests**: E2E via [Playwright](tests/) — 21 spec files covering editing, lists, sync, and UI
 - **Subagents**: worker, reviewer, scout, planner (see [AGENTS.md](AGENTS.md))
